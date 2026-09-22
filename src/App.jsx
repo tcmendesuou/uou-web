@@ -7,6 +7,8 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Notificacoes from './pages/Notificacoes';
 import Chat from './pages/Chat';
+import Carteira from './pages/Carteira';
+import Perfil from './pages/Perfil';
 import Placeholder from './pages/Placeholder';
 
 export default function App() {
@@ -41,8 +43,8 @@ export default function App() {
           <Route path="criar" element={<Placeholder title="Criar" />} />
 
           {/* Comuns aos dois modos */}
-          <Route path="carteira" element={<Placeholder title="Carteira" />} />
-          <Route path="perfil" element={<Placeholder title="Perfil" />} />
+          <Route path="carteira" element={<Carteira />} />
+          <Route path="perfil" element={<Perfil />} />
           <Route path="chat" element={<Chat />} />
         </Route>
         <Route path="*" element={<Navigate to={user ? '/' : '/login'} replace />} />
