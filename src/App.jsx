@@ -5,6 +5,7 @@ import { auth } from './firebase';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Home from './pages/Home';
+import Notificacoes from './pages/Notificacoes';
 import Placeholder from './pages/Placeholder';
 
 export default function App() {
@@ -32,7 +33,7 @@ export default function App() {
 
           {/* Modo Usuário */}
           <Route path="lives" element={<Placeholder title="Lives" />} />
-          <Route path="notificacoes" element={<Placeholder title="Notificações" />} />
+          <Route path="notificacoes" element={<Notificacoes />} />
 
           {/* Modo Criador */}
           <Route path="visualizar-perfil" element={<Placeholder title="Visualização do seu Perfil" />} />
