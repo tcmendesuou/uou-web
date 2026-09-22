@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   collection, query, orderBy, limit, onSnapshot, getDocs, where, doc, getDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { Heart, MessageCircle, Send, ChevronUp, ChevronDown } from 'lucide-react';
 
 // ✅ Mesma lógica de data relativa do HomeScreen.js do App
 function timeAgo(dateString) {
@@ -19,7 +20,7 @@ function timeAgo(dateString) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function thumbnailFor(post) {
+function mediaFor(post) {
   if (post.type === 'carousel' && post.mediaItems?.length) {
     const first = post.mediaItems[0];
     return { url: first.url, isVideo: first.type === 'video' };
@@ -30,9 +31,11 @@ function thumbnailFor(post) {
 export default function PostFeed({ selectedTab, searchText }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
     setLoading(true);
+    setCurrentIndex(0);
     let unsubscribe = () => {};
     let cancelled = false;
 
@@ -58,57 +61,36 @@ export default function PostFeed({ selectedTab, searchText }) {
     };
 
     if (selectedTab === 'para-voce') {
-      // ✅ Pra Você: tudo, sem filtro (igual ao App)
       const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(30));
       unsubscribe = onSnapshot(
         q,
         async (snapshot) => {
           const withUsers = await attachUserData(snapshot.docs);
-          if (!cancelled) {
-            setPosts(withUsers);
-            setLoading(false);
-          }
+          if (!cancelled) { setPosts(withUsers); setLoading(false); }
         },
-        (error) => {
-          console.error('[PostFeed] Erro ao carregar Pra Você:', error);
-          setLoading(false);
-        }
+        (error) => { console.error('[PostFeed] Erro ao carregar Pra Você:', error); setLoading(false); }
       );
     } else if (selectedTab === 'viral') {
-      // ✅ Viral: ordenado por likes (igual loadViralPosts do App)
       const q = query(collection(db, 'posts'), orderBy('likes', 'desc'), limit(30));
       unsubscribe = onSnapshot(
         q,
         async (snapshot) => {
           const withUsers = await attachUserData(snapshot.docs);
-          if (!cancelled) {
-            setPosts(withUsers);
-            setLoading(false);
-          }
+          if (!cancelled) { setPosts(withUsers); setLoading(false); }
         },
-        (error) => {
-          console.error('[PostFeed] Erro ao carregar Viral:', error);
-          setLoading(false);
-        }
+        (error) => { console.error('[PostFeed] Erro ao carregar Viral:', error); setLoading(false); }
       );
     } else if (selectedTab === 'seguindo') {
-      // ✅ Seguindo: só de quem o usuário segue (igual filterLivesByTab do App)
       (async () => {
         try {
           const user = auth.currentUser;
-          if (!user) {
-            if (!cancelled) { setPosts([]); setLoading(false); }
-            return;
-          }
+          if (!user) { if (!cancelled) { setPosts([]); setLoading(false); } return; }
           const followsSnap = await getDocs(
             query(collection(db, 'follows'), where('followerId', '==', user.uid))
           );
           const followingIds = followsSnap.docs.map((d) => d.data().followingId);
 
-          if (followingIds.length === 0) {
-            if (!cancelled) { setPosts([]); setLoading(false); }
-            return;
-          }
+          if (followingIds.length === 0) { if (!cancelled) { setPosts([]); setLoading(false); } return; }
 
           const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'), limit(50));
           unsubscribe = onSnapshot(
@@ -116,15 +98,9 @@ export default function PostFeed({ selectedTab, searchText }) {
             async (snapshot) => {
               const filteredDocs = snapshot.docs.filter((d) => followingIds.includes(d.data().userId));
               const withUsers = await attachUserData(filteredDocs);
-              if (!cancelled) {
-                setPosts(withUsers);
-                setLoading(false);
-              }
+              if (!cancelled) { setPosts(withUsers); setLoading(false); }
             },
-            (error) => {
-              console.error('[PostFeed] Erro ao carregar Seguindo:', error);
-              setLoading(false);
-            }
+            (error) => { console.error('[PostFeed] Erro ao carregar Seguindo:', error); setLoading(false); }
           );
         } catch (error) {
           console.error('[PostFeed] Erro ao montar Seguindo:', error);
@@ -133,10 +109,7 @@ export default function PostFeed({ selectedTab, searchText }) {
       })();
     }
 
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
+    return () => { cancelled = true; unsubscribe(); };
   }, [selectedTab]);
 
   const visiblePosts = searchText
@@ -147,6 +120,22 @@ export default function PostFeed({ selectedTab, searchText }) {
       )
     : posts;
 
+  // ✅ Se a busca/aba mudar a lista, garante que o índice não fica "fora" do array
+  useEffect(() => {
+    if (currentIndex >= visiblePosts.length) {
+      setCurrentIndex(Math.max(0, visiblePosts.length - 1));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visiblePosts.length]);
+
+  const goNext = () => setCurrentIndex((i) => Math.min(i + 1, visiblePosts.length - 1));
+  const goPrev = () => setCurrentIndex((i) => Math.max(i - 1, 0));
+
+  const handleWheel = (e) => {
+    if (e.deltaY > 20) goNext();
+    else if (e.deltaY < -20) goPrev();
+  };
+
   if (loading) {
     return <p style={styles.emptyText}>Carregando...</p>;
   }
@@ -155,58 +144,120 @@ export default function PostFeed({ selectedTab, searchText }) {
     return <p style={styles.emptyText}>Nada por aqui ainda.</p>;
   }
 
+  const post = visiblePosts[currentIndex];
+
   return (
-    <div style={styles.grid}>
-      {visiblePosts.map((post) => {
-        const { url, isVideo } = thumbnailFor(post);
-        return (
-          <div key={post.id} style={styles.card}>
-            <div style={styles.mediaWrap}>
-              {isVideo ? (
-                <video src={url} style={styles.media} muted />
-              ) : (
-                <img src={url} alt={post.caption || ''} style={styles.media} />
-              )}
-              <div style={styles.overlay}>
-                <span>❤️ {post.likes || 0}</span>
-                <span>💬 {post.commentsCount || 0}</span>
-              </div>
-            </div>
-            <div style={styles.footer}>
-              <img
-                src={post.userPhoto || 'https://via.placeholder.com/28'}
-                alt={post.userName}
-                style={styles.avatar}
-              />
-              <div>
-                <p style={styles.userName}>{post.userName}</p>
-                <p style={styles.date}>{timeAgo(post.createdAt)}</p>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+    <div style={styles.viewerWrap}>
+      <PostCard post={post} onWheel={handleWheel} />
+
+      <div style={styles.navButtons}>
+        <button
+          type="button"
+          onClick={goPrev}
+          disabled={currentIndex === 0}
+          style={{ ...styles.navButton, ...(currentIndex === 0 ? styles.navButtonDisabled : {}) }}
+          aria-label="Post anterior"
+        >
+          <ChevronUp size={22} />
+        </button>
+        <button
+          type="button"
+          onClick={goNext}
+          disabled={currentIndex === visiblePosts.length - 1}
+          style={{
+            ...styles.navButton,
+            ...(currentIndex === visiblePosts.length - 1 ? styles.navButtonDisabled : {}),
+          }}
+          aria-label="Próximo post"
+        >
+          <ChevronDown size={22} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PostCard({ post, onWheel }) {
+  const { url, isVideo } = mediaFor(post);
+  const videoRef = useRef(null);
+  const [paused, setPaused] = useState(false);
+
+  const togglePlay = () => {
+    if (!isVideo) return;
+    setPaused((p) => !p);
+  };
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (paused) videoRef.current.pause();
+    else videoRef.current.play().catch(() => {});
+  }, [paused]);
+
+  return (
+    <div style={styles.card} onWheel={onWheel}>
+      <div style={styles.mediaBox} onClick={togglePlay}>
+        {isVideo ? (
+          <video ref={videoRef} src={url} style={styles.media} autoPlay loop muted={false} playsInline />
+        ) : (
+          <img src={url} alt={post.caption || ''} style={styles.media} />
+        )}
+      </div>
+
+      {/* Info do criador — topo esquerdo */}
+      <div style={styles.topInfo}>
+        <img
+          src={post.userPhoto || 'https://via.placeholder.com/40'}
+          alt={post.userName}
+          style={styles.avatar}
+        />
+        <span style={styles.userName}>{post.userName}</span>
+      </div>
+
+      {/* Ações — lado direito */}
+      <div style={styles.actions}>
+        <div style={styles.actionButton}>
+          <Heart size={28} color="#fff" />
+          <span style={styles.actionText}>{post.likes || 0}</span>
+        </div>
+        <div style={styles.actionButton}>
+          <MessageCircle size={26} color="#fff" />
+          <span style={styles.actionText}>{post.commentsCount || 0}</span>
+        </div>
+        <div style={styles.actionButton}>
+          <Send size={24} color="#fff" />
+        </div>
+      </div>
+
+      {/* Legenda — embaixo, com degradê */}
+      <div style={styles.bottomInfo}>
+        {post.caption && <p style={styles.caption}>{post.caption}</p>}
+        <p style={styles.date}>{timeAgo(post.createdAt)}</p>
+      </div>
     </div>
   );
 }
 
 const styles = {
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-    gap: '16px',
+  viewerWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '20px',
   },
   card: {
-    backgroundColor: '#0d0d0d',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    border: '1px solid #1a1a1a',
-  },
-  mediaWrap: {
     position: 'relative',
-    width: '100%',
-    aspectRatio: '9 / 14',
+    height: '76vh',
+    aspectRatio: '9 / 16',
+    borderRadius: '16px',
+    overflow: 'hidden',
     backgroundColor: '#000',
+    border: '1px solid #1a1a1a',
+    flexShrink: 0,
+  },
+  mediaBox: {
+    width: '100%',
+    height: '100%',
+    cursor: 'pointer',
   },
   media: {
     width: '100%',
@@ -214,40 +265,87 @@ const styles = {
     objectFit: 'cover',
     display: 'block',
   },
-  overlay: {
+  topInfo: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    display: 'flex',
-    gap: '12px',
-    padding: '8px 10px',
-    background: 'linear-gradient(transparent, rgba(0,0,0,0.85))',
-    fontSize: '12px',
-    color: '#fff',
-  },
-  footer: {
+    top: '16px',
+    left: '16px',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    padding: '10px 12px',
+    gap: '10px',
   },
   avatar: {
-    width: '28px',
-    height: '28px',
+    width: '36px',
+    height: '36px',
     borderRadius: '50%',
     objectFit: 'cover',
+    border: '2px solid #52fa35',
   },
   userName: {
-    fontSize: '13px',
-    fontWeight: '600',
     color: '#fff',
+    fontSize: '14px',
+    fontWeight: '700',
+    textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+  },
+  actions: {
+    position: 'absolute',
+    right: '14px',
+    bottom: '90px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '20px',
+  },
+  actionButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '4px',
+    cursor: 'pointer',
+  },
+  actionText: {
+    color: '#fff',
+    fontSize: '12px',
+    fontWeight: '600',
+  },
+  bottomInfo: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: '40px 16px 16px',
+    background: 'linear-gradient(transparent, rgba(0,0,0,0.9))',
+  },
+  caption: {
+    color: '#fff',
+    fontSize: '13px',
     margin: 0,
+    marginBottom: '4px',
   },
   date: {
+    color: '#bbb',
     fontSize: '11px',
-    color: '#777',
     margin: 0,
+  },
+  navButtons: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+  },
+  navButton: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    border: '1px solid #333',
+    backgroundColor: '#1a1a1a',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  navButtonDisabled: {
+    opacity: 0.3,
+    cursor: 'default',
   },
   emptyText: {
     fontSize: '14px',

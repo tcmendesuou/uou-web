@@ -25,8 +25,12 @@ const CREATOR_MENU = [
   { path: '/perfil', icon: User, label: 'Perfil' },
 ];
 
+const SIDEBAR_COLLAPSED = 84;
+const SIDEBAR_EXPANDED = 260;
+
 export default function Layout() {
   const navigate = useNavigate();
+  const [hovered, setHovered] = useState(false);
 
   // ✅ Por enquanto o modo fica salvo no navegador (localStorage).
   // Quando quiser, integramos com um campo no Firestore (ex: users/{uid}.isCreator).
@@ -63,11 +67,21 @@ export default function Layout() {
     <div style={styles.container}>
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
 
-      {/* Sidebar */}
-      <aside style={styles.sidebar}>
+      {/* Sidebar — colapsada por padrão, expande no hover */}
+      <aside
+        style={{
+          ...styles.sidebar,
+          width: hovered ? `${SIDEBAR_EXPANDED}px` : `${SIDEBAR_COLLAPSED}px`,
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         <div style={styles.logo}>
           <h1 style={styles.logoText}>UOU</h1>
         </div>
+
+        {/* ✅ Espaçador: empurra o menu pra parte de baixo da sidebar */}
+        <div style={{ flex: 1 }} />
 
         <nav style={styles.nav}>
           {menuItems.map((item) => (
@@ -77,18 +91,26 @@ export default function Layout() {
               end={item.end}
               style={({ isActive }) => ({
                 ...styles.navItem,
+                ...(hovered ? styles.navItemExpanded : styles.navItemCollapsed),
                 ...(isActive ? styles.navItemActive : {}),
               })}
             >
-              <item.icon size={20} />
-              <span>{item.label}</span>
+              <item.icon size={26} style={{ flexShrink: 0 }} />
+              {hovered && <span style={styles.navLabel}>{item.label}</span>}
             </NavLink>
           ))}
         </nav>
 
-        <button style={styles.logoutButton} onClick={handleLogout}>
-          <LogOut size={20} />
-          <span>Sair</span>
+        <button
+          type="button"
+          style={{
+            ...styles.logoutButton,
+            ...(hovered ? styles.navItemExpanded : styles.navItemCollapsed),
+          }}
+          onClick={handleLogout}
+        >
+          <LogOut size={26} style={{ flexShrink: 0 }} />
+          {hovered && <span style={styles.navLabel}>Sair</span>}
         </button>
       </aside>
 
@@ -143,61 +165,77 @@ const styles = {
     position: 'relative',
   },
   sidebar: {
-    width: '260px',
     backgroundColor: '#000',
     borderRight: '1px solid #1a1a1a',
     display: 'flex',
     flexDirection: 'column',
-    padding: '20px',
+    padding: '20px 0',
     flexShrink: 0,
+    overflow: 'hidden',
+    transition: 'width 0.18s ease',
+    zIndex: 10,
   },
   logo: {
-    marginBottom: '40px',
+    marginBottom: '12px',
     paddingBottom: '20px',
+    paddingLeft: '28px',
     borderBottom: '1px solid #1a1a1a',
   },
   logoText: {
-    fontSize: '28px',
+    fontSize: '26px',
     fontWeight: '900',
     color: '#52fa35',
     margin: 0,
     letterSpacing: '2px',
+    whiteSpace: 'nowrap',
   },
   nav: {
-    flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    gap: '4px',
+    gap: '6px',
+    paddingBottom: '12px',
   },
   navItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    padding: '12px 16px',
-    borderRadius: '8px',
+    gap: '16px',
+    padding: '14px 0',
     color: '#ccc',
     textDecoration: 'none',
-    fontSize: '14px',
+    fontSize: '15px',
     fontWeight: '500',
-    transition: 'all 0.2s',
     cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  navItemCollapsed: {
+    justifyContent: 'center',
+    padding: '14px 0',
+  },
+  navItemExpanded: {
+    justifyContent: 'flex-start',
+    padding: '14px 28px',
   },
   navItemActive: {
-    backgroundColor: 'rgba(82, 250, 53, 0.15)',
     color: '#52fa35',
+  },
+  navLabel: {
+    overflow: 'hidden',
   },
   logoutButton: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    padding: '12px 16px',
-    borderRadius: '8px',
+    gap: '16px',
     color: '#ff4444',
     backgroundColor: 'transparent',
-    border: '1px solid #333',
-    fontSize: '14px',
+    border: 'none',
+    borderTop: '1px solid #1a1a1a',
+    fontSize: '15px',
     fontWeight: '500',
     cursor: 'pointer',
+    marginTop: '8px',
+    paddingTop: '20px',
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
   },
   mainWrapper: {
     flex: 1,
@@ -271,5 +309,6 @@ const styles = {
     justifyContent: 'center',
     cursor: 'pointer',
     boxShadow: '0 4px 16px rgba(82, 250, 53, 0.35)',
+    zIndex: 20,
   },
 };
