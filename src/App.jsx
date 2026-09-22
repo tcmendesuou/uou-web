@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import Notificacoes from './pages/Notificacoes';
+import Chat from './pages/Chat';
 import Placeholder from './pages/Placeholder';
 
 export default function App() {
@@ -42,7 +43,7 @@ export default function App() {
           {/* Comuns aos dois modos */}
           <Route path="carteira" element={<Placeholder title="Carteira" />} />
           <Route path="perfil" element={<Placeholder title="Perfil" />} />
-          <Route path="chat" element={<Placeholder title="Chat" />} />
+          <Route path="chat" element={<Chat />} />
         </Route>
         <Route path="*" element={<Navigate to={user ? '/' : '/login'} replace />} />
       </Routes>
