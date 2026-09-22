@@ -76,10 +76,6 @@ export default function Layout() {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <div style={styles.logo}>
-          <h1 style={styles.logoText}>UOU</h1>
-        </div>
-
         {/* ✅ Espaçador: empurra o menu pra parte de baixo da sidebar */}
         <div style={{ flex: 1 }} />
 
@@ -117,10 +113,12 @@ export default function Layout() {
       {/* Coluna principal: header + conteúdo */}
       <div style={styles.mainWrapper}>
         <header style={styles.header}>
-          <div />
+          <div style={styles.headerSide} />
+
+          <h1 style={styles.headerLogo}>UOU</h1>
 
           {/* ✅ Toggle Usuário / Criador de Conteúdo */}
-          <div style={styles.toggleWrap}>
+          <div style={{ ...styles.headerSide, ...styles.toggleWrap }}>
             <span style={{ ...styles.toggleLabel, ...(!isCreator ? styles.toggleLabelActive : {}) }}>
               Usuário
             </span>
@@ -175,20 +173,6 @@ const styles = {
     transition: 'width 0.18s ease',
     zIndex: 10,
   },
-  logo: {
-    marginBottom: '12px',
-    paddingBottom: '20px',
-    paddingLeft: '28px',
-    borderBottom: '1px solid #1a1a1a',
-  },
-  logoText: {
-    fontSize: '26px',
-    fontWeight: '900',
-    color: '#52fa35',
-    margin: 0,
-    letterSpacing: '2px',
-    whiteSpace: 'nowrap',
-  },
   nav: {
     display: 'flex',
     flexDirection: 'column',
@@ -200,7 +184,7 @@ const styles = {
     alignItems: 'center',
     gap: '16px',
     padding: '14px 0',
-    color: '#ccc',
+    color: '#f0f0f0',
     textDecoration: 'none',
     fontSize: '15px',
     fontWeight: '500',
@@ -246,20 +230,31 @@ const styles = {
   header: {
     height: '72px',
     borderBottom: '1px solid #1a1a1a',
-    display: 'flex',
+    display: 'grid',
+    gridTemplateColumns: '1fr auto 1fr',
     alignItems: 'center',
-    justifyContent: 'space-between',
     padding: '0 32px',
     flexShrink: 0,
   },
-  toggleWrap: {
+  headerSide: {
     display: 'flex',
     alignItems: 'center',
+  },
+  headerLogo: {
+    fontSize: '24px',
+    fontWeight: '900',
+    color: '#52fa35',
+    margin: 0,
+    letterSpacing: '2px',
+    justifySelf: 'center',
+  },
+  toggleWrap: {
+    justifyContent: 'flex-end',
     gap: '10px',
   },
   toggleLabel: {
     fontSize: '13px',
-    color: '#666',
+    color: '#aaa',
     fontWeight: '600',
   },
   toggleLabelActive: {

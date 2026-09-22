@@ -46,7 +46,7 @@ export default function FeedTopBar({ selectedTab, onSelectTab, searchText, onSea
           style={styles.searchButton}
           aria-label="Buscar"
         >
-          <Search size={18} color="#ccc" />
+          <Search size={18} color="#f0f0f0" />
         </button>
       </div>
     </div>
@@ -57,7 +57,8 @@ const styles = {
   container: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: '24px',
     borderBottom: '1px solid #1a1a1a',
     paddingBottom: '16px',
     marginBottom: '24px',
@@ -71,7 +72,7 @@ const styles = {
     borderRadius: '20px',
     border: 'none',
     backgroundColor: 'transparent',
-    color: '#888',
+    color: '#e0e0e0',
     fontSize: '14px',
     fontWeight: '700',
     cursor: 'pointer',
