@@ -1,17 +1,35 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import Highlights from '../components/Highlights';
+import FeedTopBar from '../components/FeedTopBar';
+import PostFeed from '../components/PostFeed';
 
 export default function Home() {
   const { isCreator } = useOutletContext();
+  const [selectedTab, setSelectedTab] = useState('para-voce');
+  const [searchText, setSearchText] = useState('');
+
+  if (isCreator) {
+    return (
+      <div>
+        <h1 style={styles.title}>Dashboard</h1>
+        <p style={styles.subtitle}>
+          Aqui vamos mostrar o resumo de lives, posts e desempenho do criador.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
-      <h1 style={styles.title}>{isCreator ? 'Dashboard' : 'Home'}</h1>
-      <p style={styles.subtitle}>
-        {isCreator
-          ? 'Aqui vamos mostrar o resumo de lives, posts e desempenho do criador.'
-          : 'Aqui vai o feed principal do usuário.'}
-      </p>
+      <Highlights />
+      <FeedTopBar
+        selectedTab={selectedTab}
+        onSelectTab={setSelectedTab}
+        searchText={searchText}
+        onSearchChange={setSearchText}
+      />
+      <PostFeed selectedTab={selectedTab} searchText={searchText} />
     </div>
   );
 }
