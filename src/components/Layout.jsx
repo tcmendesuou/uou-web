@@ -4,7 +4,7 @@ import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import {
   Home, Radio, Bell, Wallet, User, LogOut,
-  LayoutDashboard, Eye, PlusCircle, MessageCircle,
+  LayoutDashboard, Eye, PlusCircle, Film, MessageCircle,
 } from 'lucide-react';
 
 // ✅ Abas do modo Usuário comum
@@ -20,7 +20,8 @@ const USER_MENU = [
 const CREATOR_MENU = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { path: '/visualizar-perfil', icon: Eye, label: 'Visualização do Perfil' },
-  { path: '/criar', icon: PlusCircle, label: 'Criar' },
+  { path: '/postar', icon: PlusCircle, label: 'Postar' },
+  { path: '/criar', icon: Film, label: 'Criar' },
   { path: '/carteira', icon: Wallet, label: 'Carteira' },
   { path: '/perfil', icon: User, label: 'Perfil' },
 ];
