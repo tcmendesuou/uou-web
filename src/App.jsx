@@ -10,6 +10,7 @@ import Chat from './pages/Chat';
 import Carteira from './pages/Carteira';
 import Perfil from './pages/Perfil';
 import Criar from './pages/Criar';
+import VisualizacaoPerfil from './pages/VisualizacaoPerfil';
 import Placeholder from './pages/Placeholder';
 
 export default function App() {
@@ -40,7 +41,7 @@ export default function App() {
           <Route path="notificacoes" element={<Notificacoes />} />
 
           {/* Modo Criador */}
-          <Route path="visualizar-perfil" element={<Placeholder title="Visualização do seu Perfil" />} />
+          <Route path="visualizar-perfil" element={<VisualizacaoPerfil />} />
           <Route path="criar" element={<Criar />} />
 
           {/* Comuns aos dois modos */}
