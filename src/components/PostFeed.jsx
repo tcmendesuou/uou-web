@@ -148,30 +148,35 @@ export default function PostFeed({ selectedTab, searchText }) {
 
   return (
     <div style={styles.viewerWrap}>
-      <PostCard post={post} onWheel={handleWheel} />
+      {/* ✅ As setas ficam "penduradas" fora do card via position:absolute,
+          então não entram no cálculo de centralização — o card fica
+          exatamente no centro do container (mesmo eixo do logo e das abas). */}
+      <div style={styles.cardSlot}>
+        <PostCard post={post} onWheel={handleWheel} />
 
-      <div style={styles.navButtons}>
-        <button
-          type="button"
-          onClick={goPrev}
-          disabled={currentIndex === 0}
-          style={{ ...styles.navButton, ...(currentIndex === 0 ? styles.navButtonDisabled : {}) }}
-          aria-label="Post anterior"
-        >
-          <ChevronUp size={22} />
-        </button>
-        <button
-          type="button"
-          onClick={goNext}
-          disabled={currentIndex === visiblePosts.length - 1}
-          style={{
-            ...styles.navButton,
-            ...(currentIndex === visiblePosts.length - 1 ? styles.navButtonDisabled : {}),
-          }}
-          aria-label="Próximo post"
-        >
-          <ChevronDown size={22} />
-        </button>
+        <div style={styles.navButtons}>
+          <button
+            type="button"
+            onClick={goPrev}
+            disabled={currentIndex === 0}
+            style={{ ...styles.navButton, ...(currentIndex === 0 ? styles.navButtonDisabled : {}) }}
+            aria-label="Post anterior"
+          >
+            <ChevronUp size={22} />
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={currentIndex === visiblePosts.length - 1}
+            style={{
+              ...styles.navButton,
+              ...(currentIndex === visiblePosts.length - 1 ? styles.navButtonDisabled : {}),
+            }}
+            aria-label="Próximo post"
+          >
+            <ChevronDown size={22} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -242,7 +247,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '20px',
+  },
+  cardSlot: {
+    position: 'relative',
   },
   card: {
     position: 'relative',
@@ -327,6 +334,10 @@ const styles = {
     margin: 0,
   },
   navButtons: {
+    position: 'absolute',
+    top: '50%',
+    left: 'calc(100% + 20px)',
+    transform: 'translateY(-50%)',
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',

@@ -12,6 +12,11 @@ export default function FeedTopBar({ selectedTab, onSelectTab, searchText, onSea
 
   return (
     <div style={styles.container}>
+      {/* Coluna vazia à esquerda — existe só pra manter as abas exatamente
+          centralizadas, no mesmo eixo do logo do header e dos posts,
+          mesmo com a lupa ocupando espaço à direita. */}
+      <div />
+
       <div style={styles.tabs}>
         {TABS.map((tab) => (
           <button
@@ -55,10 +60,9 @@ export default function FeedTopBar({ selectedTab, onSelectTab, searchText, onSea
 
 const styles = {
   container: {
-    display: 'flex',
+    display: 'grid',
+    gridTemplateColumns: '1fr auto 1fr',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: '24px',
     borderBottom: '1px solid #1a1a1a',
     paddingBottom: '16px',
     marginBottom: '24px',
@@ -85,6 +89,7 @@ const styles = {
   searchWrap: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: '8px',
   },
   searchInput: {
