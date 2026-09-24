@@ -1,13 +1,104 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc, getDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, getDoc, doc, updateDoc } from 'firebase/firestore';
 import { storage, db, auth } from '../firebase';
 import { Images, Plus, X, Play, ImageOff } from 'lucide-react';
 
 const MAX_MEDIA = 3;
 
 export default function Postar() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  // ✅ Veio da aba Prontos (Criar): já tem o vídeo editado e salvo no
+  // Storage — só falta a legenda, sem passar pelo picker/upload de novo.
+  const readyVideo = location.state?.readyVideo || null;
+
+  if (readyVideo) {
+    return <PostarVideoPronto video={readyVideo} onDone={() => navigate('/')} />;
+  }
+
+  return <PostarNovo />;
+}
+
+function PostarVideoPronto({ video, onDone }) {
+  const [caption, setCaption] = useState('');
+  const [posting, setPosting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handlePost = async () => {
+    if (!caption.trim()) {
+      setError('Adicione uma legenda');
+      return;
+    }
+    setError('');
+    setPosting(true);
+    try {
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const userData = userDoc.exists() ? userDoc.data() : {};
+
+      await addDoc(collection(db, 'posts'), {
+        type: 'video',
+        mediaUrl: video.url,
+        mediaType: 'video',
+        caption: caption.trim(),
+        userId: auth.currentUser.uid,
+        userName: userData?.name || 'Usuário',
+        userPhoto: userData?.photoURL || null,
+        likes: 0,
+        commentsCount: 0,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Marca o vídeo na biblioteca como já postado (continua em Prontos,
+      // só fica sinalizado — nada é apagado automaticamente).
+      if (video.id) {
+        try {
+          await updateDoc(doc(db, 'creator_videos', video.id), { postedAt: new Date().toISOString() });
+        } catch (e) {
+          // não bloqueia o post se isso falhar
+        }
+      }
+
+      onDone();
+    } catch (err) {
+      console.error('[Postar] Erro ao postar vídeo pronto:', err);
+      setError('Não foi possível publicar o post. Tente novamente.');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.headerRow}>
+        <h1 style={styles.pageTitle}>Postar Vídeo</h1>
+        <button style={styles.postButton(!!caption.trim() && !posting)} onClick={handlePost} disabled={!caption.trim() || posting}>
+          {posting ? 'Publicando...' : 'Postar'}
+        </button>
+      </div>
+
+      {error && <p style={styles.errorText}>{error}</p>}
+
+      <div style={styles.readyPreviewWrap}>
+        <video src={video.url} style={styles.readyPreviewVideo} controls />
+      </div>
+
+      <div style={styles.captionWrap}>
+        <textarea
+          style={styles.captionInput}
+          placeholder="Escreva uma legenda..."
+          value={caption}
+          onChange={(e) => setCaption(e.target.value.slice(0, 500))}
+          rows={4}
+        />
+        <p style={styles.captionCounter}>{caption.length}/500</p>
+      </div>
+    </div>
+  );
+}
+
+function PostarNovo() {
   const navigate = useNavigate();
   const [mediaList, setMediaList] = useState([]); // [{file, previewUrl, type}]
   const [caption, setCaption] = useState('');
@@ -261,6 +352,19 @@ const styles = {
     gap: 12,
     marginBottom: 18,
     flexWrap: 'wrap',
+  },
+  readyPreviewWrap: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  readyPreviewVideo: {
+    width: '100%',
+    maxWidth: 320,
+    aspectRatio: '9 / 16',
+    borderRadius: 12,
+    backgroundColor: '#000',
+    objectFit: 'contain',
   },
   mediaThumb: {
     position: 'relative',
