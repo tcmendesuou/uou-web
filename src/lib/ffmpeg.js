@@ -4,7 +4,7 @@ import { toBlobURL } from '@ffmpeg/util';
 // ✅ Core single-thread do ffmpeg.wasm, carregado via CDN (jsdelivr) como
 // blob URL — evita precisar configurar headers COOP/COEP no Vercel/Vite
 // (que só são exigidos pela versão multi-thread).
-const CORE_BASE_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+const CORE_BASE_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
 
 let ffmpegInstance = null;
 let loadingPromise = null;
