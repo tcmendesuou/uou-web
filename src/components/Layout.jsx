@@ -3,8 +3,8 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import {
-  Home, Radio, Bell, Wallet, User, LogOut,
-  LayoutDashboard, Eye, PlusCircle, Film, MessageCircle,
+  Home, Radio, Bell, User, LogOut,
+  LayoutDashboard, PlusCircle, Film, Wallet, MessageCircle,
 } from 'lucide-react';
 
 // ✅ Abas do modo Usuário comum
@@ -12,18 +12,15 @@ const USER_MENU = [
   { path: '/', icon: Home, label: 'Home', end: true },
   { path: '/lives', icon: Radio, label: 'Lives' },
   { path: '/notificacoes', icon: Bell, label: 'Notificações' },
-  { path: '/carteira', icon: Wallet, label: 'Carteira' },
   { path: '/perfil', icon: User, label: 'Perfil' },
 ];
 
 // ✅ Abas do modo Criador de Conteúdo (trocam quando o toggle é ativado)
 const CREATOR_MENU = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
-  { path: '/visualizar-perfil', icon: Eye, label: 'Visualização do Perfil' },
   { path: '/postar', icon: PlusCircle, label: 'Postar' },
   { path: '/criar', icon: Film, label: 'Criar' },
   { path: '/carteira', icon: Wallet, label: 'Carteira' },
-  { path: '/perfil', icon: User, label: 'Perfil' },
 ];
 
 const SIDEBAR_COLLAPSED = 84;
