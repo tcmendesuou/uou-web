@@ -252,7 +252,7 @@ export default function LiveViewer() {
       </div>
 
       <div style={styles.chatCol}>
-        <LiveChat liveId={liveId} userName={me.name} messages={messages} />
+        <LiveChat liveId={liveId} userName={me.name} messages={messages} disabled={live.commentsEnabled === false} />
       </div>
     </div>
   );

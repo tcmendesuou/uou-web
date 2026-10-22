@@ -27,6 +27,7 @@ export default function LiveForm() {
   const [prizeSource, setPrizeSource] = useState('pot');
   const [prizePercent, setPrizePercent] = useState('50');
   const [prizeAmount, setPrizeAmount] = useState('');
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledAt, setScheduledAt] = useState('');
   const [teaserFile, setTeaserFile] = useState(null);
@@ -115,6 +116,7 @@ export default function LiveForm() {
         {
           title, description, price, category, duration, isPremium,
           prizeSource, prizeAmount, prizePercent, isScheduled, scheduledAt, teaserFile,
+          commentsEnabled,
         },
         wallet
       );
@@ -248,7 +250,7 @@ export default function LiveForm() {
                     onChange={(e) => setPrizePercent(e.target.value.replace(/[^0-9.,]/g, ''))}
                   />
                   <p style={{ ...styles.sub, marginTop: 6 }}>
-                    Ao entrar ao vivo, {brl(priceValue)} saem da sua carteira como reserva do prêmio mínimo
+                    Ao entrar ao vivo, {brl(priceValue)} saem da sua carteira como garantia do prêmio mínimo
                     (o que não for usado volta pra você).
                   </p>
                 </div>
@@ -259,6 +261,9 @@ export default function LiveForm() {
                 <div style={{ marginLeft: 30 }}>
                   <p style={styles.sub}>
                     Saldo disponível: <span style={{ color: GREEN }}>{brl(wallet)}</span>
+                  </p>
+                  <p style={{ ...styles.sub, margin: '4px 0 6px 0' }}>
+                    O valor do prêmio fica travado na sua carteira ao entrar ao vivo.
                   </p>
                   <input
                     style={styles.input}
@@ -293,6 +298,14 @@ export default function LiveForm() {
           </div>
           <p style={{ ...styles.sub, marginTop: 8 }}>A live é encerrada automaticamente quando esse tempo acaba.</p>
         </Field>
+
+        <div style={{ ...styles.switchRow, marginBottom: 20 }}>
+          <div>
+            <p style={styles.label}>Comentários</p>
+            <p style={styles.sub}>{commentsEnabled ? 'Os espectadores podem comentar' : 'Comentários desativados'}</p>
+          </div>
+          <Switch on={commentsEnabled} onChange={setCommentsEnabled} label="Comentários" />
+        </div>
 
         <div style={{ ...styles.switchRow, marginBottom: 16 }}>
           <p style={styles.label}>Agendar para depois</p>

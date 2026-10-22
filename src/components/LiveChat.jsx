@@ -42,7 +42,7 @@ export default function LiveChat({ liveId, userName, messages, disabled = false 
       <form onSubmit={submit} style={styles.form}>
         <input
           style={styles.input}
-          placeholder={disabled ? 'Chat indisponível' : 'Mensagem...'}
+          placeholder={disabled ? 'Comentários desativados' : 'Mensagem...'}
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, 500))}
           disabled={disabled}

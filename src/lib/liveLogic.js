@@ -4,7 +4,7 @@
 // acerto final. Mesmos campos e mesmos tipos de transação do app.
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
-  collection, query, where, increment,
+  collection, query, where, increment, runTransaction,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, auth, storage } from '../firebase';
@@ -223,6 +223,7 @@ export async function createLive(values, creatorWallet) {
   const {
     title, description, price, category, duration, isPremium,
     prizeSource, prizeAmount, prizePercent, isScheduled, scheduledAt, teaserFile,
+    commentsEnabled = true,
   } = values;
 
   if (!title.trim()) throw new Error('Adicione um título para a live.');
@@ -274,6 +275,7 @@ export async function createLive(values, creatorWallet) {
     prizeReserve: 0, // só é debitada quando a live realmente começa
     viewers: 0,
     likes: 0,
+    commentsEnabled: commentsEnabled !== false,
     createdAt: new Date().toISOString(),
   };
   if (isScheduled) liveData.scheduledDate = scheduledIso;
@@ -288,9 +290,12 @@ export async function deleteLive(liveId) {
 }
 
 /**
- * Passo financeiro do "Entrar ao vivo". Em live premiada com prêmio vindo do
- * pote, o criador paga a entrada da própria live (vira reserva do prêmio).
- * Retorna { ok: true } ou { ok: false, message }.
+ * Passo financeiro do "Entrar ao vivo" (igual ao app): em live premiada o
+ * criador trava uma GARANTIA na carteira — o valor do prêmio (modo carteira)
+ * ou o preço de entrada da própria live (modo pote). Fica em prizeReserve.
+ * É idempotente: se já existe reserva, não cobra de novo.
+ *
+ * Retorna { ok: true, guaranteeAmount, title } ou { ok: false, message }.
  */
 export async function prepareGoLive(liveId) {
   const uid = auth.currentUser.uid;
@@ -298,33 +303,93 @@ export async function prepareGoLive(liveId) {
   const live = liveSnap.data();
   if (!live) return { ok: false, message: 'Live não encontrada.' };
 
-  // Se já está no ar (retomada de transmissão), não cobra de novo
-  if (live.status === 'live') return { ok: true, live };
+  // Já está no ar (retomada) ou não é premiada ou já tem reserva: nada a cobrar
+  if (live.status === 'live' || !live.isPremium || (live.prizeReserve || 0) > 0) {
+    return { ok: true, guaranteeAmount: 0, title: live.title };
+  }
 
-  // Se a reserva já foi debitada (ex.: deu erro ao entrar no ar e o criador
-  // tentou de novo), não cobra duas vezes.
-  if (live.isPremium && live.prizeSource === 'pot' && !(live.prizeReserve > 0)) {
-    const priceValue = live.price || 0;
-    const creatorSnap = await getDoc(doc(db, 'users', uid));
-    const wallet = creatorSnap.data()?.wallet || 0;
-    if (wallet < priceValue) {
+  let amount = 0;
+  let description = '';
+  if (live.prizeSource === 'wallet') {
+    amount = live.prizeAmount || 0;
+    description = `Garantia do prêmio (carteira): ${live.title}`;
+  } else if (live.prizeSource === 'pot') {
+    amount = live.price || 0;
+    description = `Entrada como criador na própria live premiada: ${live.title}`;
+  }
+  if (amount <= 0) return { ok: true, guaranteeAmount: 0, title: live.title };
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const opRef = doc(db, 'wallet_operations', `live_garantia_${liveId}_${uid}`);
+      const opSnap = await tx.get(opRef);
+      if (opSnap.exists()) return;
+
+      const userRef = doc(db, 'users', uid);
+      const userSnap = await tx.get(userRef);
+      const current = userSnap.data()?.wallet || 0;
+      if (current < amount) throw new Error(`INSUFFICIENT_WALLET:${current}`);
+
+      const liveRef = doc(db, 'lives', liveId);
+      const liveTx = await tx.get(liveRef);
+      if ((liveTx.data()?.prizeReserve || 0) > 0) return;
+
+      tx.set(opRef, {
+        type: 'live_premiada_entrada',
+        userId: uid,
+        liveId,
+        amount,
+        prizeSource: live.prizeSource,
+        createdAt: new Date().toISOString(),
+      });
+      tx.update(userRef, { wallet: current - amount });
+      tx.update(liveRef, { prizeReserve: amount });
+    });
+  } catch (err) {
+    if (String(err?.message || '').startsWith('INSUFFICIENT_WALLET')) {
+      const bal = parseFloat(String(err.message).split(':')[1] || '0');
       return {
         ok: false,
-        message: `Para iniciar essa Live Premiada você precisa ter ${brl(priceValue)} na carteira (o valor de entrada da sua própria live). Seu saldo atual: ${brl(wallet)}.`,
+        message: live.prizeSource === 'wallet'
+          ? `Para iniciar essa Live Premiada você precisa ter ${brl(amount)} na carteira (valor do prêmio). Seu saldo atual: ${brl(bal)}.`
+          : `Para iniciar essa Live Premiada você precisa ter ${brl(amount)} na carteira (o valor de entrada da sua própria live). Seu saldo atual: ${brl(bal)}.`,
       };
     }
-    await updateDoc(doc(db, 'users', uid), { wallet: increment(-priceValue) });
-    await updateDoc(doc(db, 'lives', liveId), { prizeReserve: priceValue });
-    await addDoc(collection(db, 'transactions'), {
-      userId: uid,
-      type: 'live_premiada_entrada',
-      description: `Entrada como criador na própria live premiada: ${live.title}`,
-      amount: priceValue,
-      liveId,
-      date: new Date().toISOString(),
-    });
+    throw err;
   }
-  return { ok: true, live };
+
+  await addDoc(collection(db, 'transactions'), {
+    userId: uid,
+    type: 'live_premiada_entrada',
+    description,
+    amount,
+    liveId,
+    date: new Date().toISOString(),
+  });
+  return { ok: true, guaranteeAmount: amount, title: live.title };
+}
+
+/** Devolve a garantia quando falha ao entrar no ar depois de já ter cobrado. */
+export async function refundGuarantee(liveId, amount, title) {
+  const uid = auth.currentUser.uid;
+  await runTransaction(db, async (tx) => {
+    const liveRef = doc(db, 'lives', liveId);
+    const liveTx = await tx.get(liveRef);
+    const reserveNow = liveTx.data()?.prizeReserve || 0;
+    if (reserveNow <= 0) return;
+    const userRef = doc(db, 'users', uid);
+    const userSnap = await tx.get(userRef);
+    tx.update(userRef, { wallet: (userSnap.data()?.wallet || 0) + reserveNow });
+    tx.update(liveRef, { prizeReserve: 0 });
+  });
+  await addDoc(collection(db, 'transactions'), {
+    userId: uid,
+    type: 'live_reserva_devolvida',
+    description: `Estorno da garantia (falha ao iniciar): ${title}`,
+    amount,
+    liveId,
+    date: new Date().toISOString(),
+  });
 }
 
 export async function markLiveStarted(liveId) {
@@ -363,8 +428,8 @@ export async function executePrizeDraw(liveId) {
     );
 
     if (accessSnapshot.empty) {
-      // Ninguém pagou: devolve a reserva do criador (modo pote)
-      if (live.prizeSource === 'pot' && live.prizeReserve > 0) {
+      // Ninguém pagou: devolve a reserva do criador (qualquer modo premiado)
+      if (live.prizeReserve > 0) {
         await updateDoc(doc(db, 'users', live.userId), { wallet: increment(live.prizeReserve) });
         await addDoc(collection(db, 'transactions'), {
           userId: live.userId,
@@ -386,7 +451,8 @@ export async function executePrizeDraw(liveId) {
     let organicPrize = 0;
     let reserveRefund = 0;
     if (live.prizeSource === 'wallet') {
-      prizeValue = live.prizeAmount || 0;
+      // Usa a garantia travada ao entrar ao vivo (fallback p/ lives antigas)
+      prizeValue = live.prizeReserve || live.prizeAmount || 0;
     } else {
       // Prêmio "orgânico": só o que veio do pote (espectadores)
       organicPrize = (live.potBalance || 0) * ((live.prizePercent || 0) / 100);
@@ -408,7 +474,8 @@ export async function executePrizeDraw(liveId) {
       });
 
       if (live.prizeSource === 'wallet') {
-        await updateDoc(doc(db, 'users', live.userId), { wallet: increment(-prizeValue) });
+        // A garantia já saiu da carteira ao entrar ao vivo: só zera a reserva
+        await updateDoc(doc(db, 'lives', liveId), { prizeReserve: 0 });
       } else {
         await updateDoc(doc(db, 'lives', liveId), {
           potBalance: increment(-organicPrize),

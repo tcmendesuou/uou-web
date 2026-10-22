@@ -4,15 +4,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
-import { StreamVideo, StreamCall } from '@stream-io/video-react-sdk';
+import { StreamVideo, StreamCall, BackgroundFiltersProvider } from '@stream-io/video-react-sdk';
 import { db, auth } from '../firebase';
 import { useLiveSession } from '../lib/stream';
 import { useLiveDoc, useLiveMessages, usePrizeClock, useRemainingSeconds } from '../lib/liveHooks';
 import {
-  DRAW_COUNTDOWN_SECONDS, prepareGoLive, markLiveStarted, finalizeLive, executePrizeDraw, deleteLive,
+  DRAW_COUNTDOWN_SECONDS, prepareGoLive, refundGuarantee, markLiveStarted, finalizeLive, executePrizeDraw, deleteLive,
 } from '../lib/liveLogic';
 import { LiveStage, HostControls } from '../components/LiveStage';
 import LiveChat from '../components/LiveChat';
+import BackgroundEffects from '../components/BackgroundEffects';
 import { LiveTopBar, LiveInfo, DrawCountdown, WinnerCard } from '../components/LiveOverlays';
 
 export default function LiveHost() {
@@ -111,7 +112,24 @@ export default function LiveHost() {
         setNotice(prep.message);
         return; // continua no backstage, nada foi cobrado
       }
-      await session.call.goLive();
+      try {
+        await session.call.goLive();
+      } catch (goLiveErr) {
+        console.error('[LiveHost] erro ao sair do backstage:', goLiveErr);
+        // Já cobrou a garantia? Devolve, para não deixar o criador sem live e sem dinheiro
+        if (prep.guaranteeAmount > 0) {
+          try {
+            await refundGuarantee(liveId, prep.guaranteeAmount, prep.title);
+            setNotice('Não foi possível iniciar a transmissão. O valor da garantia foi estornado.');
+          } catch (refundErr) {
+            console.error('[LiveHost] erro ao estornar garantia:', refundErr);
+            setNotice('Não foi possível iniciar a transmissão e o estorno da garantia falhou. Fale com o suporte.');
+          }
+        } else {
+          setNotice('Não foi possível iniciar a transmissão. Tente novamente.');
+        }
+        return;
+      }
       await markLiveStarted(liveId);
     } catch (err) {
       console.error('[LiveHost] erro ao ir ao vivo:', err);
@@ -168,17 +186,20 @@ export default function LiveHost() {
     body = (
       <StreamVideo client={session.client}>
         <StreamCall call={session.call}>
-          <div style={styles.stageBox}>
-            <LiveStage hostId={uid} isHost />
-            {overlays}
-          </div>
-          <HostControls
-            isBackstage={isBackstage}
-            busy={busy}
-            onGoLive={handleGoLive}
-            onEnd={handleEnd}
-            onCancel={handleCancel}
-          />
+          <BackgroundFiltersProvider onError={(err) => console.error('[LiveHost] efeito de fundo:', err)}>
+            <div style={styles.stageBox}>
+              <LiveStage hostId={uid} isHost />
+              {overlays}
+            </div>
+            <HostControls
+              isBackstage={isBackstage}
+              busy={busy}
+              onGoLive={handleGoLive}
+              onEnd={handleEnd}
+              onCancel={handleCancel}
+            />
+            <BackgroundEffects />
+          </BackgroundFiltersProvider>
         </StreamCall>
       </StreamVideo>
     );
@@ -225,7 +246,7 @@ export default function LiveHost() {
       </div>
 
       <div style={styles.chatCol}>
-        <LiveChat liveId={liveId} userName={me.name} messages={messages} />
+        <LiveChat liveId={liveId} userName={me.name} messages={messages} disabled={live.commentsEnabled === false} />
       </div>
     </div>
   );
