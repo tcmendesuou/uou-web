@@ -11,7 +11,9 @@ import Carteira from './pages/Carteira';
 import Perfil from './pages/Perfil';
 import Criar from './pages/Criar';
 import Postar from './pages/Postar';
-import Placeholder from './pages/Placeholder';
+import Lives from './pages/Lives';
+import LiveViewer from './pages/LiveViewer';
+import LiveHost from './pages/LiveHost';
 
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined = carregando, null = deslogado
@@ -37,11 +39,13 @@ export default function App() {
           <Route index element={<Home />} />
 
           {/* Modo Usuário */}
-          <Route path="lives" element={<Placeholder title="Lives" />} />
+          <Route path="lives" element={<Lives />} />
+          <Route path="lives/:liveId" element={<LiveViewer />} />
           <Route path="notificacoes" element={<Notificacoes />} />
 
           {/* Modo Criador */}
           <Route path="postar" element={<Postar />} />
+          <Route path="transmitir/:liveId" element={<LiveHost />} />
           <Route path="criar" element={<Criar />} />
           <Route path="carteira" element={<Carteira />} />
 

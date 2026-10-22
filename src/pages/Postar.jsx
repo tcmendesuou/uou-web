@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc, getDoc, doc, updateDoc } from 'firebase/firestore';
 import { storage, db, auth } from '../firebase';
-import { Images, Plus, X, Play, ImageOff } from 'lucide-react';
+import { Images, Plus, X, Play, ImageOff, Radio } from 'lucide-react';
+import LiveForm from '../components/LiveForm';
 
 const MAX_MEDIA = 3;
 
@@ -13,12 +14,36 @@ export default function Postar() {
   // ✅ Veio da aba Prontos (Criar): já tem o vídeo editado e salvo no
   // Storage — só falta a legenda, sem passar pelo picker/upload de novo.
   const readyVideo = location.state?.readyVideo || null;
+  // ✅ Alternância Post | Live (a Live é criada aqui, no modo Criador)
+  const [mode, setMode] = useState('post');
 
   if (readyVideo) {
     return <PostarVideoPronto video={readyVideo} onDone={() => navigate('/')} />;
   }
 
-  return <PostarNovo />;
+  return (
+    <div>
+      <div style={styles.modeTabs}>
+        <button type="button" style={styles.modeTab(mode === 'post')} onClick={() => setMode('post')}>
+          <Images size={16} /> Post
+        </button>
+        <button type="button" style={styles.modeTab(mode === 'live')} onClick={() => setMode('live')}>
+          <Radio size={16} /> Live
+        </button>
+      </div>
+
+      {mode === 'post' ? (
+        <PostarNovo />
+      ) : (
+        <div style={styles.container}>
+          <div style={styles.headerRow}>
+            <h1 style={styles.pageTitle}>Nova Live</h1>
+          </div>
+          <LiveForm />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PostarVideoPronto({ video, onDone }) {
@@ -314,6 +339,32 @@ function PostarNovo() {
 }
 
 const styles = {
+  modeTabs: {
+    display: 'flex',
+    gap: 8,
+    maxWidth: 560,
+    margin: '0 auto 20px',
+    padding: 4,
+    backgroundColor: '#0d0d0d',
+    border: '1px solid #1a1a1a',
+    borderRadius: 12,
+  },
+  modeTab: (active) => ({
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: '10px 0',
+    border: 'none',
+    borderRadius: 9,
+    backgroundColor: active ? '#52fa35' : 'transparent',
+    color: active ? '#000' : '#aaa',
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
+  }),
   container: {
     fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
     maxWidth: 560,
