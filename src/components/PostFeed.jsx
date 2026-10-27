@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   collection, query, orderBy, limit, onSnapshot, getDocs, where, doc, getDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Heart, MessageCircle, Send, ChevronUp, ChevronDown } from 'lucide-react';
+import {
+  Heart, MessageCircle, Send, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Radio, Users, CalendarClock,
+} from 'lucide-react';
 
 // ✅ Mesma lógica de data relativa do HomeScreen.js do App
 function timeAgo(dateString) {
@@ -20,18 +23,110 @@ function timeAgo(dateString) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function mediaFor(post) {
+// ✅ Todas as mídias do post (carrossel tem várias; os outros têm uma só)
+function mediaListFor(post) {
   if (post.type === 'carousel' && post.mediaItems?.length) {
-    const first = post.mediaItems[0];
-    return { url: first.url, isVideo: first.type === 'video' };
+    return post.mediaItems
+      .filter((m) => m?.url)
+      .map((m) => ({ url: m.url, isVideo: m.type === 'video' }));
   }
-  return { url: post.mediaUrl, isVideo: post.type === 'video' };
+  return post.mediaUrl ? [{ url: post.mediaUrl, isVideo: post.type === 'video' }] : [];
+}
+
+const isVideoUrl = (url) =>
+  !!url && /\.(mp4|mov|webm)(\?|$)/i.test(decodeURIComponent(String(url)).split('#')[0]);
+
+const brl = (v) => `R$ ${(Number(v) || 0).toFixed(2).replace('.', ',')}`;
+
+// ✅ Lives no feed (igual ao app): lives no ar + agendadas de quem você segue
+function useFeedLives(followingIds) {
+  const [liveItems, setLiveItems] = useState([]);
+  const [scheduledItems, setScheduledItems] = useState([]);
+
+  const withUser = async (docSnap, extra) => {
+    const live = docSnap.data();
+    let userData = {};
+    try {
+      const userDoc = await getDoc(doc(db, 'users', live.userId));
+      userData = userDoc.exists() ? userDoc.data() : {};
+    } catch (error) {
+      console.error('[PostFeed] Erro ao carregar dono da live:', error);
+    }
+    return {
+      id: `${extra.type}_${docSnap.id}`,
+      liveId: docSnap.id,
+      teaserUrl: live.teaserUrl || live.thumbnail || null,
+      title: live.title,
+      userId: live.userId,
+      userName: userData.name || live.userName || 'Usuário',
+      userPhoto: userData.photoURL || live.userPhoto || null,
+      price: live.price || 0,
+      category: live.category,
+      viewers: live.viewers || 0,
+      isPremium: !!live.isPremium,
+      ...extra,
+    };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const unsub = onSnapshot(
+      query(collection(db, 'lives'), where('status', '==', 'live')),
+      async (snap) => {
+        const items = await Promise.all(
+          snap.docs.map((d) =>
+            withUser(d, { type: 'live_teaser', createdAt: d.data().startedAt || d.data().createdAt || new Date().toISOString() })
+          )
+        );
+        if (!cancelled) setLiveItems(items);
+      },
+      (error) => console.error('[PostFeed] Erro ao carregar lives:', error)
+    );
+    return () => { cancelled = true; unsub(); };
+  }, []);
+
+  // Agendadas: só de quem você segue (como no app)
+  useEffect(() => {
+    if (!followingIds || followingIds.length === 0) { setScheduledItems([]); return undefined; }
+    let cancelled = false;
+    const unsub = onSnapshot(
+      query(collection(db, 'lives'), where('status', '==', 'scheduled')),
+      async (snap) => {
+        const mine = snap.docs.filter((d) => followingIds.includes(d.data().userId));
+        const items = await Promise.all(
+          mine.map((d) =>
+            withUser(d, {
+              type: 'scheduled_teaser',
+              scheduledFor: d.data().scheduledDate || d.data().scheduledFor || null,
+              createdAt: d.data().createdAt || new Date().toISOString(),
+            })
+          )
+        );
+        if (!cancelled) setScheduledItems(items);
+      },
+      (error) => console.error('[PostFeed] Erro ao carregar lives agendadas:', error)
+    );
+    return () => { cancelled = true; unsub(); };
+  }, [followingIds]);
+
+  return { liveItems, scheduledItems };
 }
 
 export default function PostFeed({ selectedTab, searchText }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [followingIds, setFollowingIds] = useState(null); // null = ainda carregando
+  const { liveItems, scheduledItems } = useFeedLives(followingIds);
+
+  // Quem você segue (usado para 'Seguindo' e para as lives agendadas)
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) { setFollowingIds([]); return; }
+    getDocs(query(collection(db, 'follows'), where('followerId', '==', user.uid)))
+      .then((snap) => setFollowingIds(snap.docs.map((d) => d.data().followingId)))
+      .catch((error) => { console.error('[PostFeed] Erro ao carregar follows:', error); setFollowingIds([]); });
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -112,13 +207,31 @@ export default function PostFeed({ selectedTab, searchText }) {
     return () => { cancelled = true; unsubscribe(); };
   }, [selectedTab]);
 
-  const visiblePosts = searchText
-    ? posts.filter(
+  // ✅ Feed combinado: posts + lives (as lives entram em "Pra Você" e "Seguindo")
+  let combined = posts;
+  if (selectedTab === 'para-voce') {
+    combined = [...posts, ...liveItems, ...scheduledItems];
+  } else if (selectedTab === 'seguindo') {
+    const ids = followingIds || [];
+    combined = [
+      ...posts,
+      ...liveItems.filter((l) => ids.includes(l.userId)),
+      ...scheduledItems.filter((l) => ids.includes(l.userId)),
+    ];
+  }
+  if (selectedTab !== 'viral') {
+    combined = [...combined].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  const q = (searchText || '').toLowerCase();
+  const visiblePosts = q
+    ? combined.filter(
         (p) =>
-          p.caption?.toLowerCase().includes(searchText.toLowerCase()) ||
-          p.userName?.toLowerCase().includes(searchText.toLowerCase())
+          p.caption?.toLowerCase().includes(q) ||
+          p.title?.toLowerCase().includes(q) ||
+          p.userName?.toLowerCase().includes(q)
       )
-    : posts;
+    : combined;
 
   // ✅ Se a busca/aba mudar a lista, garante que o índice não fica "fora" do array
   useEffect(() => {
@@ -152,7 +265,11 @@ export default function PostFeed({ selectedTab, searchText }) {
           então não entram no cálculo de centralização — o card fica
           exatamente no centro do container (mesmo eixo do logo e das abas). */}
       <div style={styles.cardSlot}>
-        <PostCard post={post} onWheel={handleWheel} />
+        {post.type === 'live_teaser' || post.type === 'scheduled_teaser' ? (
+          <LiveTeaserCard key={post.id} item={post} onWheel={handleWheel} />
+        ) : (
+          <PostCard key={post.id} post={post} onWheel={handleWheel} />
+        )}
 
         <div style={styles.navButtons}>
           <button
@@ -183,9 +300,14 @@ export default function PostFeed({ selectedTab, searchText }) {
 }
 
 function PostCard({ post, onWheel }) {
-  const { url, isVideo } = mediaFor(post);
+  const medias = mediaListFor(post);
+  const [slide, setSlide] = useState(0);
+  const safeSlide = Math.min(slide, Math.max(0, medias.length - 1));
+  const current = medias[safeSlide] || { url: null, isVideo: false };
+  const { url, isVideo } = current;
   const videoRef = useRef(null);
   const [paused, setPaused] = useState(false);
+  const many = medias.length > 1;
 
   const togglePlay = () => {
     if (!isVideo) return;
@@ -196,15 +318,25 @@ function PostCard({ post, onWheel }) {
     if (!videoRef.current) return;
     if (paused) videoRef.current.pause();
     else videoRef.current.play().catch(() => {});
-  }, [paused]);
+  }, [paused, safeSlide]);
+
+  const go = (delta) => (e) => {
+    e.stopPropagation();
+    setPaused(false);
+    setSlide((i) => Math.min(Math.max(i + delta, 0), medias.length - 1));
+  };
 
   return (
     <div style={styles.card} onWheel={onWheel}>
       <div style={styles.mediaBox} onClick={togglePlay}>
         {isVideo ? (
-          <video ref={videoRef} src={url} style={styles.media} autoPlay loop muted={false} playsInline />
+          <video key={url} ref={videoRef} src={url} style={styles.mediaContain} autoPlay loop muted={false} playsInline />
         ) : (
-          <img src={url} alt={post.caption || ''} style={styles.media} />
+          <>
+            {/* fundo desfocado preenche as sobras; a foto aparece INTEIRA por cima */}
+            <img src={url} alt="" aria-hidden style={styles.mediaBlur} />
+            <img src={url} alt={post.caption || ''} style={styles.mediaContain} />
+          </>
         )}
       </div>
 
@@ -217,6 +349,28 @@ function PostCard({ post, onWheel }) {
         />
         <span style={styles.userName}>{post.userName}</span>
       </div>
+
+      {/* Carrossel: contador, setas e bolinhas */}
+      {many && (
+        <>
+          <div style={styles.slideCounter}>{safeSlide + 1}/{medias.length}</div>
+          {safeSlide > 0 && (
+            <button type="button" onClick={go(-1)} style={{ ...styles.slideArrow, left: 10 }} aria-label="Mídia anterior">
+              <ChevronLeft size={20} />
+            </button>
+          )}
+          {safeSlide < medias.length - 1 && (
+            <button type="button" onClick={go(1)} style={{ ...styles.slideArrow, right: 10 }} aria-label="Próxima mídia">
+              <ChevronRight size={20} />
+            </button>
+          )}
+          <div style={styles.dots}>
+            {medias.map((_, i) => (
+              <span key={i} style={{ ...styles.dot, ...(i === safeSlide ? styles.dotActive : {}) }} />
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Ações — lado direito */}
       <div style={styles.actions}>
@@ -237,6 +391,70 @@ function PostCard({ post, onWheel }) {
       <div style={styles.bottomInfo}>
         {post.caption && <p style={styles.caption}>{post.caption}</p>}
         <p style={styles.date}>{timeAgo(post.createdAt)}</p>
+      </div>
+    </div>
+  );
+}
+
+// ✅ Card de live no feed (ao vivo ou agendada), igual ao teaser do app
+function LiveTeaserCard({ item, onWheel }) {
+  const navigate = useNavigate();
+  const isLive = item.type === 'live_teaser';
+  const mine = item.userId === auth.currentUser?.uid;
+  const when = item.scheduledFor
+    ? new Date(item.scheduledFor).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : '';
+
+  const open = () => {
+    if (!isLive && !mine) return; // agendada ainda não pode ser assistida
+    navigate(mine ? `/transmitir/${item.liveId}` : `/lives/${item.liveId}`);
+  };
+
+  const media = item.teaserUrl;
+
+  return (
+    <div style={{ ...styles.card, cursor: isLive || mine ? 'pointer' : 'default' }} onWheel={onWheel} onClick={open}>
+      <div style={styles.mediaBox}>
+        {media && isVideoUrl(media) ? (
+          <video src={media} style={styles.media} autoPlay loop muted playsInline />
+        ) : media ? (
+          <img src={media} alt="" style={styles.media} />
+        ) : (
+          <div style={styles.teaserEmpty}>
+            <Radio size={56} color="#2a2a2a" />
+          </div>
+        )}
+      </div>
+
+      <div style={styles.topInfo}>
+        <img src={item.userPhoto || 'https://via.placeholder.com/40'} alt={item.userName} style={styles.avatar} />
+        <span style={styles.userName}>{item.userName}</span>
+      </div>
+
+      <div style={styles.liveBadgeWrap}>
+        {isLive ? (
+          <span style={styles.liveBadge}>AO VIVO</span>
+        ) : (
+          <span style={styles.scheduledBadge}><CalendarClock size={12} /> AGENDADA</span>
+        )}
+        {isLive && (
+          <span style={styles.viewersBadge}><Users size={12} /> {item.viewers || 0}</span>
+        )}
+      </div>
+
+      <div style={styles.bottomInfo}>
+        <p style={styles.liveTitle}>{item.title}</p>
+        <p style={styles.date}>
+          {item.category ? `${item.category} · ` : ''}
+          {item.price > 0 ? brl(item.price) : 'Grátis'}
+          {item.isPremium ? ' · Premiada' : ''}
+          {!isLive && when ? ` · ${when}` : ''}
+        </p>
+        {(isLive || mine) && (
+          <button type="button" style={styles.watchBtn} onClick={(e) => { e.stopPropagation(); open(); }}>
+            <Radio size={15} /> {mine ? 'Continuar transmissão' : 'Assistir ao vivo'}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -271,6 +489,137 @@ const styles = {
     height: '100%',
     objectFit: 'cover',
     display: 'block',
+  },
+  mediaBlur: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    filter: 'blur(28px) brightness(0.55)',
+    transform: 'scale(1.15)',
+  },
+  mediaContain: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    display: 'block',
+  },
+  slideCounter: {
+    position: 'absolute',
+    top: '18px',
+    right: '16px',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    color: '#fff',
+    fontSize: '12px',
+    fontWeight: '700',
+    borderRadius: '12px',
+    padding: '4px 10px',
+  },
+  slideArrow: {
+    position: 'absolute',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: '34px',
+    height: '34px',
+    borderRadius: '50%',
+    border: 'none',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    zIndex: 3,
+  },
+  dots: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: '84px',
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '6px',
+    zIndex: 2,
+  },
+  dot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    backgroundColor: 'rgba(255,255,255,0.4)',
+  },
+  dotActive: {
+    backgroundColor: '#fff',
+  },
+  teaserEmpty: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(160deg, #0b0b12, #050508)',
+  },
+  liveBadgeWrap: {
+    position: 'absolute',
+    top: '20px',
+    right: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  liveBadge: {
+    backgroundColor: '#e5262b',
+    color: '#fff',
+    fontSize: '11px',
+    fontWeight: '800',
+    borderRadius: '8px',
+    padding: '4px 9px',
+  },
+  scheduledBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    color: '#52fa35',
+    fontSize: '11px',
+    fontWeight: '800',
+    borderRadius: '8px',
+    padding: '4px 9px',
+  },
+  viewersBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    color: '#fff',
+    fontSize: '12px',
+    fontWeight: '600',
+    borderRadius: '8px',
+    padding: '4px 9px',
+  },
+  liveTitle: {
+    color: '#fff',
+    fontSize: '16px',
+    fontWeight: '700',
+    margin: '0 0 4px 0',
+  },
+  watchBtn: {
+    marginTop: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    width: '100%',
+    border: 'none',
+    borderRadius: '12px',
+    padding: '11px 0',
+    backgroundColor: '#52fa35',
+    color: '#000',
+    fontSize: '14px',
+    fontWeight: '800',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
   topInfo: {
     position: 'absolute',
