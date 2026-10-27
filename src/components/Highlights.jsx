@@ -1,13 +1,52 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { groupRings, buildTicker, firstUnseenIndex, isRingFullySeen } from '../lib/storyLogic';
+import StoryViewer from './StoryViewer';
 
-// ✅ Bloco "highlight" da Home (igual ao app): lives ao vivo de quem você segue.
-// Os Stories de 24h entram aqui na próxima etapa.
+// ✅ Bloco "highlight" da Home (igual ao app): lives de quem você segue + Stories de 24h.
 export default function Highlights() {
   const navigate = useNavigate();
   const [followingLives, setFollowingLives] = useState([]);
+  const [rings, setRings] = useState([]);
+  const [seenKeys, setSeenKeys] = useState(new Set());
+  const [viewerPos, setViewerPos] = useState(null);
+
+  // Stories (24h): mesmas coleções do app — stories + storyViews (já vistos)
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    const storiesRef = { current: [] };
+    const seenRef = { current: new Set() };
+    const rebuild = () => { setRings(groupRings(storiesRef.current)); setSeenKeys(new Set(seenRef.current)); };
+    const unsubStories = onSnapshot(
+      query(collection(db, 'stories'), orderBy('createdAt', 'desc'), limit(50)),
+      (snap) => { storiesRef.current = snap.docs.map((d) => ({ id: d.id, ...d.data() })); rebuild(); },
+      (error) => console.error('[Highlights] Erro ao carregar stories:', error)
+    );
+    let unsubSeen = () => {};
+    if (uid) {
+      unsubSeen = onSnapshot(
+        query(collection(db, 'storyViews'), where('viewerUid', '==', uid)),
+        (snap) => { seenRef.current = new Set(snap.docs.map((d) => d.id)); rebuild(); },
+        (error) => console.error('[Highlights] Erro ao carregar stories vistos:', error)
+      );
+    }
+    return () => { unsubStories(); unsubSeen(); };
+  }, []);
+
+  // Seu story primeiro (se ativo), depois os demais — igual ao app
+  const orderedRings = useMemo(() => {
+    const uid = auth.currentUser?.uid;
+    return [...rings.filter((r) => r.userId === uid), ...rings.filter((r) => r.userId !== uid)];
+  }, [rings]);
+
+  const openRing = (ring) => {
+    const ticker = buildTicker(rings);
+    const ringStart = ticker.findIndex((t) => t.ringIndex === rings.indexOf(ring));
+    if (ringStart === -1) return;
+    setViewerPos(Math.min(ringStart + firstUnseenIndex(ring, seenKeys), ticker.length - 1));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -56,8 +95,8 @@ export default function Highlights() {
     return () => { cancelled = true; unsubscribe(); };
   }, []);
 
-  // Nada ao vivo (e ainda sem Stories): não ocupa espaço na Home
-  if (followingLives.length === 0) return null;
+  // Nada ao vivo e sem Stories: não ocupa espaço na Home
+  if (followingLives.length === 0 && rings.length === 0) return null;
 
   return (
     <div style={styles.container}>
@@ -80,6 +119,26 @@ export default function Highlights() {
           <span style={styles.name}>{live.userName}</span>
         </button>
       ))}
+
+      {orderedRings.map((ring) => {
+        const seen = isRingFullySeen(ring, seenKeys);
+        return (
+          <button key={ring.userId} type="button" style={styles.item} onClick={() => openRing(ring)} title={ring.userName}>
+            <div style={{ ...styles.storyRing, ...(seen ? styles.storyRingSeen : styles.storyRingNew) }}>
+              {ring.userPhoto ? (
+                <img src={ring.userPhoto} alt={ring.userName} style={styles.storyPhoto} />
+              ) : (
+                <div style={{ ...styles.storyPhoto, backgroundColor: '#222' }} />
+              )}
+            </div>
+            <span style={styles.name}>{ring.userId === auth.currentUser?.uid ? 'Seu highlight' : ring.userName}</span>
+          </button>
+        );
+      })}
+
+      {viewerPos !== null && (
+        <StoryViewer rings={rings} initialPos={viewerPos} onClose={() => setViewerPos(null)} />
+      )}
     </div>
   );
 }
@@ -112,7 +171,7 @@ const styles = {
     width: '62px',
     height: '62px',
     borderRadius: '50%',
-    border: '3px solid #e5262b',
+    border: '3px solid #52fa35',
     padding: '2px',
     boxSizing: 'border-box',
   },
@@ -130,8 +189,17 @@ const styles = {
     width: '14px',
     height: '14px',
     borderRadius: '50%',
-    backgroundColor: '#e5262b',
+    backgroundColor: '#52fa35',
     border: '2px solid #010208',
+  },
+  storyRing: {
+    width: '62px', height: '62px', borderRadius: '50%', padding: '3px', boxSizing: 'border-box',
+  },
+  storyRingNew: { background: 'linear-gradient(135deg, #FEDA75, #FA7E1E, #D62976, #962FBF)' },
+  storyRingSeen: { background: '#3a3a3a' },
+  storyPhoto: {
+    width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', display: 'block',
+    border: '2px solid #010208', boxSizing: 'border-box',
   },
   name: {
     color: '#e0e0e0',
