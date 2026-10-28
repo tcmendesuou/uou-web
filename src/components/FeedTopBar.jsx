@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Zap } from 'lucide-react';
 
 const TABS = [
   { id: 'para-voce', label: 'Pra Você' },
   { id: 'seguindo', label: 'Seguindo' },
   { id: 'viral', label: 'Viral' },
 ];
+
+const VIRAL_COLOR = '#00ff00';
 
 export default function FeedTopBar({ selectedTab, onSelectTab, searchText, onSearchChange }) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -28,7 +30,18 @@ export default function FeedTopBar({ selectedTab, onSelectTab, searchText, onSea
               ...(selectedTab === tab.id ? styles.tabActive : {}),
             }}
           >
-            {tab.label}
+            {tab.id === 'viral' ? (
+              <span style={styles.viralRow}>
+                <Zap size={11} color={VIRAL_COLOR} fill={VIRAL_COLOR} />
+                <span style={{ color: VIRAL_COLOR }}>{tab.label.toUpperCase()}</span>
+                <Zap size={11} color={VIRAL_COLOR} fill={VIRAL_COLOR} />
+              </span>
+            ) : (
+              tab.label
+            )}
+            {selectedTab === tab.id && (
+              <span style={{ ...styles.indicator, ...(tab.id === 'viral' ? { backgroundColor: '#00BFFF' } : {}) }} />
+            )}
           </button>
         ))}
       </div>
@@ -69,22 +82,30 @@ const styles = {
   },
   tabs: {
     display: 'flex',
-    gap: '8px',
+    gap: '30px',
   },
   tab: {
-    padding: '8px 18px',
-    borderRadius: '20px',
+    position: 'relative',
+    padding: '4px 0',
     border: 'none',
     backgroundColor: 'transparent',
-    color: '#e0e0e0',
+    color: '#666',
     fontSize: '14px',
-    fontWeight: '700',
+    fontWeight: '600',
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
   tabActive: {
-    backgroundColor: 'rgba(82, 250, 53, 0.15)',
-    color: '#52fa35',
+    color: '#fff',
+  },
+  viralRow: { display: 'flex', alignItems: 'center', gap: '3px' },
+  indicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '2px',
+    backgroundColor: '#00ff00',
   },
   searchWrap: {
     display: 'flex',

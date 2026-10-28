@@ -24,6 +24,36 @@ function timeAgo(dateString) {
 }
 
 // ✅ Todas as mídias do post (carrossel tem várias; os outros têm uma só)
+// @usuário: igual ao app (userHandle, ou o nome sem acentos/espaços)
+function toHandle(item) {
+  if (item.userHandle) return item.userHandle;
+  return String(item.userName || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._]/g, '').replace(/^[._]+|[._]+$/g, '');
+}
+
+// ✅ Cabeçalho do criador, igual ao app: pílula com foto, nome e @usuário · data
+// + botão "Seguindo" no canto direito.
+function CreatorHeader({ item, following }) {
+  const handle = toHandle(item);
+  const mine = item.userId === auth.currentUser?.uid;
+  return (
+    <>
+      <div style={styles.topInfo}>
+        <img src={item.userPhoto || 'https://via.placeholder.com/40'} alt={item.userName} style={styles.avatar} />
+        <div style={styles.creatorText}>
+          <span style={styles.userName}>{item.userName}</span>
+          <span style={styles.handleRow}>
+            {handle ? `@${handle} · ` : ''}{timeAgo(item.createdAt)}
+          </span>
+        </div>
+      </div>
+      {following && !mine && <span style={styles.followingPill}>Seguindo</span>}
+    </>
+  );
+}
+
 function mediaListFor(post) {
   if (post.type === 'carousel' && post.mediaItems?.length) {
     return post.mediaItems
@@ -60,6 +90,7 @@ function useFeedLives(followingIds) {
       userId: live.userId,
       userName: userData.name || live.userName || 'Usuário',
       userPhoto: userData.photoURL || live.userPhoto || null,
+      userHandle: userData.userHandle || userData.username || userData.handle || null,
       price: live.price || 0,
       category: live.category,
       viewers: live.viewers || 0,
@@ -150,6 +181,7 @@ export default function PostFeed({ selectedTab, searchText }) {
           ...post,
           userName: userData.name || 'Usuário',
           userPhoto: userData.photoURL || null,
+          userHandle: userData.userHandle || userData.username || userData.handle || null,
         };
       });
       return Promise.all(promises);
@@ -266,9 +298,9 @@ export default function PostFeed({ selectedTab, searchText }) {
           exatamente no centro do container (mesmo eixo do logo e das abas). */}
       <div style={styles.cardSlot}>
         {post.type === 'live_teaser' || post.type === 'scheduled_teaser' ? (
-          <LiveTeaserCard key={post.id} item={post} onWheel={handleWheel} />
+          <LiveTeaserCard key={post.id} item={post} onWheel={handleWheel} following={(followingIds || []).includes(post.userId)} />
         ) : (
-          <PostCard key={post.id} post={post} onWheel={handleWheel} />
+          <PostCard key={post.id} post={post} onWheel={handleWheel} following={(followingIds || []).includes(post.userId)} />
         )}
 
         <div style={styles.navButtons}>
@@ -299,7 +331,7 @@ export default function PostFeed({ selectedTab, searchText }) {
   );
 }
 
-function PostCard({ post, onWheel }) {
+function PostCard({ post, onWheel, following }) {
   const medias = mediaListFor(post);
   const [slide, setSlide] = useState(0);
   const safeSlide = Math.min(slide, Math.max(0, medias.length - 1));
@@ -340,20 +372,12 @@ function PostCard({ post, onWheel }) {
         )}
       </div>
 
-      {/* Info do criador — topo esquerdo */}
-      <div style={styles.topInfo}>
-        <img
-          src={post.userPhoto || 'https://via.placeholder.com/40'}
-          alt={post.userName}
-          style={styles.avatar}
-        />
-        <span style={styles.userName}>{post.userName}</span>
-      </div>
+      {/* Info do criador — topo, igual ao app */}
+      <CreatorHeader item={post} following={following} />
 
       {/* Carrossel: contador, setas e bolinhas */}
       {many && (
         <>
-          <div style={styles.slideCounter}>{safeSlide + 1}/{medias.length}</div>
           {safeSlide > 0 && (
             <button type="button" onClick={go(-1)} style={{ ...styles.slideArrow, left: 10 }} aria-label="Mídia anterior">
               <ChevronLeft size={20} />
@@ -375,29 +399,34 @@ function PostCard({ post, onWheel }) {
       {/* Ações — lado direito */}
       <div style={styles.actions}>
         <div style={styles.actionButton}>
-          <Heart size={28} color="#fff" />
+          <Heart size={32} color="#fff" />
           <span style={styles.actionText}>{post.likes || 0}</span>
         </div>
         <div style={styles.actionButton}>
-          <MessageCircle size={26} color="#fff" />
+          <MessageCircle size={28} color="#fff" />
           <span style={styles.actionText}>{post.commentsCount || 0}</span>
         </div>
         <div style={styles.actionButton}>
-          <Send size={24} color="#fff" />
+          <Send size={28} color="#fff" />
         </div>
+        <img
+          src="/donor-button.png"
+          alt="Apoiar com doação"
+          style={styles.donorButton}
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
       </div>
 
       {/* Legenda — embaixo, com degradê */}
       <div style={styles.bottomInfo}>
         {post.caption && <p style={styles.caption}>{post.caption}</p>}
-        <p style={styles.date}>{timeAgo(post.createdAt)}</p>
       </div>
     </div>
   );
 }
 
 // ✅ Card de live no feed (ao vivo ou agendada), igual ao teaser do app
-function LiveTeaserCard({ item, onWheel }) {
+function LiveTeaserCard({ item, onWheel, following }) {
   const navigate = useNavigate();
   const isLive = item.type === 'live_teaser';
   const mine = item.userId === auth.currentUser?.uid;
@@ -426,10 +455,7 @@ function LiveTeaserCard({ item, onWheel }) {
         )}
       </div>
 
-      <div style={styles.topInfo}>
-        <img src={item.userPhoto || 'https://via.placeholder.com/40'} alt={item.userName} style={styles.avatar} />
-        <span style={styles.userName}>{item.userName}</span>
-      </div>
+      <CreatorHeader item={item} following={following} />
 
       <div style={styles.liveBadgeWrap}>
         {isLive ? (
@@ -537,7 +563,7 @@ const styles = {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: '84px',
+    top: '70px',
     display: 'flex',
     justifyContent: 'center',
     gap: '6px',
@@ -546,11 +572,12 @@ const styles = {
   dot: {
     width: '6px',
     height: '6px',
-    borderRadius: '50%',
-    backgroundColor: 'rgba(255,255,255,0.4)',
+    borderRadius: '3px',
+    backgroundColor: 'rgba(255,255,255,0.5)',
   },
   dotActive: {
     backgroundColor: '#fff',
+    width: '20px',
   },
   teaserEmpty: {
     width: '100%',
@@ -623,34 +650,77 @@ const styles = {
   },
   topInfo: {
     position: 'absolute',
-    top: '16px',
-    left: '16px',
+    top: '10px',
+    left: '8px',
+    right: '104px',
+    zIndex: 10,
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
+    gap: '8px',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    padding: '5px 8px',
+    borderRadius: '25px',
+    width: 'fit-content',
+    maxWidth: 'calc(100% - 112px)',
   },
   avatar: {
-    width: '36px',
-    height: '36px',
+    width: '32px',
+    height: '32px',
     borderRadius: '50%',
     objectFit: 'cover',
-    border: '2px solid #52fa35',
+    border: '2px solid #fff',
+    flexShrink: 0,
   },
+  creatorText: { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 },
   userName: {
     color: '#fff',
     fontSize: '14px',
     fontWeight: '700',
-    textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+    textShadow: '0 1px 3px rgba(0,0,0,0.75)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  handleRow: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: '12px',
+    textShadow: '0 1px 3px rgba(0,0,0,0.75)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  followingPill: {
+    position: 'absolute',
+    top: '14px',
+    right: '12px',
+    zIndex: 20,
+    height: '30px',
+    padding: '0 16px',
+    display: 'flex',
+    alignItems: 'center',
+    borderRadius: '15px',
+    backgroundColor: '#2a1a5e',
+    color: '#fff',
+    fontSize: '12px',
+    fontWeight: '700',
   },
   actions: {
     position: 'absolute',
-    right: '14px',
+    right: '12px',
     bottom: '90px',
+    zIndex: 10,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     gap: '20px',
+    padding: '16px 9px 6px',
+    borderRadius: '26px',
+    backgroundColor: 'rgba(0,0,0,0.22)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
   },
+  donorButton: { width: '40px', height: '40px', display: 'block' },
   actionButton: {
     display: 'flex',
     flexDirection: 'column',
@@ -668,12 +738,14 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    padding: '40px 16px 16px',
-    background: 'linear-gradient(transparent, rgba(0,0,0,0.9))',
+    padding: '40px 59px 16px 15px',
+    background: 'linear-gradient(transparent, rgba(0,0,0,0.8), rgba(0,0,0,0.95))',
   },
   caption: {
     color: '#fff',
     fontSize: '13px',
+    lineHeight: '18px',
+    textShadow: '0 1px 3px rgba(0,0,0,0.75)',
     margin: 0,
     marginBottom: '4px',
   },

@@ -21,7 +21,10 @@ export default function Home() {
   }
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
+      {/* Degradê roxo no topo, igual ao ScreenGlow do app */}
+      <div style={styles.glow} aria-hidden />
+      <div style={{ position: 'relative', zIndex: 1 }}>
       <Highlights />
       <FeedTopBar
         selectedTab={selectedTab}
@@ -30,11 +33,21 @@ export default function Home() {
         onSearchChange={setSearchText}
       />
       <PostFeed selectedTab={selectedTab} searchText={searchText} />
+      </div>
     </div>
   );
 }
 
 const styles = {
+  glow: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '360px',
+    pointerEvents: 'none',
+    background: 'radial-gradient(ellipse 80% 100% at 50% 0%, rgba(96, 36, 140, 0.55) 0%, rgba(40, 14, 70, 0.28) 45%, rgba(1, 2, 8, 0) 100%)',
+  },
   title: {
     fontSize: '28px',
     fontWeight: 'bold',
