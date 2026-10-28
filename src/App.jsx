@@ -1,19 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Home from './pages/Home';
-import Notificacoes from './pages/Notificacoes';
-import Chat from './pages/Chat';
-import Carteira from './pages/Carteira';
-import Perfil from './pages/Perfil';
-import Criar from './pages/Criar';
-import Postar from './pages/Postar';
-import Lives from './pages/Lives';
-import LiveViewer from './pages/LiveViewer';
-import LiveHost from './pages/LiveHost';
+const Notificacoes = lazy(() => import('./pages/Notificacoes'));
+const Chat = lazy(() => import('./pages/Chat'));
+const Carteira = lazy(() => import('./pages/Carteira'));
+const Perfil = lazy(() => import('./pages/Perfil'));
+const Criar = lazy(() => import('./pages/Criar'));
+const Postar = lazy(() => import('./pages/Postar'));
+const Lives = lazy(() => import('./pages/Lives'));
+const LiveViewer = lazy(() => import('./pages/LiveViewer'));
+const LiveHost = lazy(() => import('./pages/LiveHost'));
 
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined = carregando, null = deslogado
@@ -33,6 +33,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<div style={styles.loading}><p>Carregando...</p></div>}>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/" element={user ? <Layout /> : <Navigate to="/login" replace />}>
@@ -55,6 +56,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to={user ? '/' : '/login'} replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

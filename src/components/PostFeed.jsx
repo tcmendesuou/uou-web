@@ -54,13 +54,28 @@ function CreatorHeader({ item, following }) {
   );
 }
 
+// ✅ Cache de dados do dono (nome/foto): antes cada atualização do feed
+// (um like, por exemplo) rebuscava o usuário de TODOS os posts no Firestore.
+const USER_TTL_MS = 5 * 60 * 1000;
+const userCache = new Map(); // uid -> { at, promise }
+function getUserData(uid) {
+  if (!uid) return Promise.resolve({});
+  const hit = userCache.get(uid);
+  if (hit && Date.now() - hit.at < USER_TTL_MS) return hit.promise;
+  const promise = getDoc(doc(db, 'users', uid))
+    .then((snap) => (snap.exists() ? snap.data() : {}))
+    .catch((error) => { userCache.delete(uid); console.error('[PostFeed] Erro ao carregar usuário:', error); return {}; });
+  userCache.set(uid, { at: Date.now(), promise });
+  return promise;
+}
+
 function mediaListFor(post) {
   if (post.type === 'carousel' && post.mediaItems?.length) {
     return post.mediaItems
       .filter((m) => m?.url)
-      .map((m) => ({ url: m.url, isVideo: m.type === 'video' }));
+      .map((m) => ({ url: m.url, thumb: m.thumbnailUrl || null, isVideo: m.type === 'video' }));
   }
-  return post.mediaUrl ? [{ url: post.mediaUrl, isVideo: post.type === 'video' }] : [];
+  return post.mediaUrl ? [{ url: post.mediaUrl, thumb: post.thumbnailUrl || null, isVideo: post.type === 'video' }] : [];
 }
 
 const isVideoUrl = (url) =>
@@ -75,13 +90,7 @@ function useFeedLives(followingIds) {
 
   const withUser = async (docSnap, extra) => {
     const live = docSnap.data();
-    let userData = {};
-    try {
-      const userDoc = await getDoc(doc(db, 'users', live.userId));
-      userData = userDoc.exists() ? userDoc.data() : {};
-    } catch (error) {
-      console.error('[PostFeed] Erro ao carregar dono da live:', error);
-    }
+    const userData = await getUserData(live.userId);
     return {
       id: `${extra.type}_${docSnap.id}`,
       liveId: docSnap.id,
@@ -169,13 +178,7 @@ export default function PostFeed({ selectedTab, searchText }) {
     const attachUserData = async (rawDocs) => {
       const promises = rawDocs.map(async (docSnap) => {
         const post = docSnap.data();
-        let userData = {};
-        try {
-          const userDoc = await getDoc(doc(db, 'users', post.userId));
-          userData = userDoc.exists() ? userDoc.data() : {};
-        } catch (error) {
-          console.error('[PostFeed] Erro ao carregar dono do post:', error);
-        }
+        const userData = await getUserData(post.userId);
         return {
           id: docSnap.id,
           ...post,
@@ -273,6 +276,15 @@ export default function PostFeed({ selectedTab, searchText }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visiblePosts.length]);
 
+  // ✅ Pré-carrega a foto do próximo post: ao avançar, já está no cache
+  useEffect(() => {
+    const next = visiblePosts[currentIndex + 1];
+    if (!next || next.type === 'live_teaser' || next.type === 'scheduled_teaser') return;
+    const m = mediaListFor(next)[0];
+    if (m && !m.isVideo) new Image().src = m.thumb || m.url;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, visiblePosts.length]);
+
   const goNext = () => setCurrentIndex((i) => Math.min(i + 1, visiblePosts.length - 1));
   const goPrev = () => setCurrentIndex((i) => Math.max(i - 1, 0));
 
@@ -336,7 +348,8 @@ function PostCard({ post, onWheel, following }) {
   const [slide, setSlide] = useState(0);
   const safeSlide = Math.min(slide, Math.max(0, medias.length - 1));
   const current = medias[safeSlide] || { url: null, isVideo: false };
-  const { url, isVideo } = current;
+  const { url, thumb, isVideo } = current;
+  const photoSrc = thumb || url;
   const videoRef = useRef(null);
   const [paused, setPaused] = useState(false);
   const many = medias.length > 1;
@@ -362,12 +375,12 @@ function PostCard({ post, onWheel, following }) {
     <div style={styles.card} onWheel={onWheel}>
       <div style={styles.mediaBox} onClick={togglePlay}>
         {isVideo ? (
-          <video key={url} ref={videoRef} src={url} style={styles.mediaContain} autoPlay loop muted={false} playsInline />
+          <video key={url} ref={videoRef} src={url} poster={thumb || undefined} preload="auto" style={styles.mediaContain} autoPlay loop muted={false} playsInline />
         ) : (
           <>
             {/* fundo desfocado preenche as sobras; a foto aparece INTEIRA por cima */}
-            <img src={url} alt="" aria-hidden style={styles.mediaBlur} />
-            <img src={url} alt={post.caption || ''} style={styles.mediaContain} />
+            <img src={photoSrc} alt="" aria-hidden decoding="async" style={styles.mediaBlur} />
+            <img src={photoSrc} alt={post.caption || ''} decoding="async" style={styles.mediaContain} />
           </>
         )}
       </div>

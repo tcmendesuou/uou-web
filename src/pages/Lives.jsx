@@ -221,9 +221,18 @@ function LiveCard({ live, mine, paid, buying, onOpen, onBuy }) {
     <div style={styles.card}>
       {media ? (
         isVideoUrl(media) ? (
-          <video src={media} style={styles.cardMedia} muted loop autoPlay playsInline />
+          <video
+            src={media}
+            style={styles.cardMedia}
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+            onMouseLeave={(e) => e.currentTarget.pause()}
+          />
         ) : (
-          <img src={media} alt="" style={styles.cardMedia} />
+          <img src={media} alt="" loading="lazy" decoding="async" style={styles.cardMedia} />
         )
       ) : (
         <div style={styles.cardEmpty}><ImageOff size={36} color="#2a2a2a" /></div>
