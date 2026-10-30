@@ -561,3 +561,8 @@ export async function finalizeLive(liveId) {
 export async function incrementViewers(liveId, amount) {
   await updateDoc(doc(db, 'lives', liveId), { viewers: increment(amount) });
 }
+
+// Marca que a live está sendo gravada (a aba Lives do editor usa isso para buscar as gravações)
+export async function markLiveRecording(liveId) {
+  await updateDoc(doc(db, 'lives', liveId), { recording: true });
+}

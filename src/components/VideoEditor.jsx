@@ -11,11 +11,12 @@ import { FILTERS, filterCss } from '../lib/editorFilters';
 import { TEXT_FONTS, TEXT_STYLES, TEXT_ANIMS, TEXT_COLORS, makeText, textState, textCss } from '../lib/editorText';
 import { TRANSITIONS, DEFAULT_TRANSITION_SECONDS, transitionAt, effectParams, cssFor } from '../lib/editorTransitions';
 import {
-  X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
+  Radio, X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
   Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight, Video, CheckCircle2, MonitorUp,
 } from 'lucide-react';
 
 const GREEN = '#52fa35';
+const STATUS_OF_TAB = { brutos: 'raw', prontos: 'ready', lives: 'live' };
 const MIN_CLIP = 0.2; // segundos
 const RATIOS = [
   { id: '9:16', w: 9, h: 16 },
@@ -113,6 +114,8 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const [tool, setTool] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [mediaTab, setMediaTab] = useState('brutos');
+  const [askName, setAskName] = useState(false); // janela de confirmação do nome ao exportar
+  const [exportName, setExportName] = useState('');
   const [cloud, setCloud] = useState([]); // vídeos da biblioteca do criador (Brutos e Prontos)
   const [exportPct, setExportPct] = useState(0);
   const [exportError, setExportError] = useState('');
@@ -332,8 +335,23 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   };
 
   // -------- exportar --------
-  const handleExport = async () => {
+  const normName = (n) => String(n || '').replace(/\.[^.]+$/, '').trim().toLowerCase();
+  const takenNames = () => new Set(cloudRef.current.filter((v) => v.status === 'ready').map((v) => normName(v.originalName)));
+  const openExport = () => {
     if (!clips.length || exporting) return;
+    const base = (nameRef.current || '').trim() || 'Meu vídeo';
+    const taken = takenNames();
+    let n = 1;
+    let candidate = base;
+    while (taken.has(normName(candidate))) { n += 1; candidate = `${base} ${n}`; }
+    setExportName(candidate);
+    setAskName(true);
+  };
+  const nameTaken = !!exportName.trim() && takenNames().has(normName(exportName));
+
+  const handleExport = async (finalName) => {
+    if (!clips.length || exporting) return;
+    setAskName(false);
     if (dirtyRef.current) saveProject();
     setPlaying(false);
     setExportError('');
@@ -351,11 +369,11 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         signal: cancelRef.current,
         texts: textsRef.current,
       });
-      if (onExported) await onExported(blob);
+      if (onExported) await onExported(blob, finalName);
       else {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'uou-video.mp4';
+        a.download = `${finalName || 'uou-video'}.mp4`;
         a.click();
       }
     } catch (err) {
@@ -854,7 +872,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
           type="button"
           style={{ ...s.exportBtn, ...(clips.length && !exporting ? s.exportBtnOn : {}) }}
           disabled={!clips.length || exporting}
-          onClick={handleExport}
+          onClick={openExport}
         >
           <Download size={16} /> {onExported ? 'Exportar e salvar em Prontos' : 'Exportar'}
         </button>
@@ -895,6 +913,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
               {[
                 { id: 'brutos', label: 'Brutos', icon: Video },
                 { id: 'prontos', label: 'Prontos', icon: CheckCircle2 },
+                { id: 'lives', label: 'Lives', icon: Radio },
                 { id: 'computador', label: 'Computador', icon: MonitorUp },
               ].map(({ id, label, icon: Icon }) => (
                 <button key={id} type="button" style={s.mediaTab(mediaTab === id)} onClick={() => setMediaTab(id)}>
@@ -909,14 +928,14 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
               </button>
             ) : (
               <div style={s.libList}>
-                {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).length === 0 && (
+                {cloud.filter((v) => v.status === STATUS_OF_TAB[mediaTab]).length === 0 && (
                   <p style={s.hint}>
-                    {mediaTab === 'brutos'
-                      ? 'Nenhum vídeo bruto salvo ainda. Suas gravações do app aparecem aqui.'
-                      : 'Nenhum vídeo pronto ainda. Exporte um vídeo e ele aparece aqui.'}
+                    {mediaTab === 'brutos' && 'Nenhum vídeo bruto salvo ainda. Suas gravações do app aparecem aqui.'}
+                    {mediaTab === 'prontos' && 'Nenhum vídeo pronto ainda. Exporte um vídeo e ele aparece aqui.'}
+                    {mediaTab === 'lives' && 'Nenhuma live gravada ainda. Abra a aba Lives em Editar para buscar suas gravações.'}
                   </p>
                 )}
-                {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).map((v) => (
+                {cloud.filter((v) => v.status === STATUS_OF_TAB[mediaTab]).map((v) => (
                   <div
                     key={v.id}
                     draggable
@@ -1256,6 +1275,34 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         </div>
       )}
 
+      {askName && (
+        <div style={s.overlay}>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Nome do vídeo</p>
+          <input
+            autoFocus
+            value={exportName}
+            maxLength={80}
+            onChange={(e) => setExportName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && exportName.trim() && !nameTaken) handleExport(exportName.trim()); }}
+            style={s.nameInput}
+          />
+          <p style={{ ...s.hint, color: nameTaken ? '#ff6b6b' : '#666' }}>
+            {nameTaken ? 'Já existe um vídeo pronto com esse nome. Escolha outro.' : 'Dê um nome diferente para cada vídeo que exportar.'}
+          </p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" style={s.cancelBtn} onClick={() => setAskName(false)}>Cancelar</button>
+            <button
+              type="button"
+              style={{ ...s.cancelBtn, borderColor: GREEN, color: GREEN, backgroundColor: 'rgba(82,250,53,0.1)', opacity: exportName.trim() && !nameTaken ? 1 : 0.4 }}
+              disabled={!exportName.trim() || nameTaken}
+              onClick={() => handleExport(exportName.trim())}
+            >
+              Exportar
+            </button>
+          </div>
+        </div>
+      )}
+
       {exporting && (
         <div style={s.overlay}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Exportando seu vídeo...</p>
@@ -1312,6 +1359,10 @@ const s = {
   overlay: {
     position: 'absolute', inset: 0, zIndex: 20, backgroundColor: 'rgba(3,4,8,0.88)', display: 'flex',
     flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,
+  },
+  nameInput: {
+    width: 320, maxWidth: '80%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 6, border: '1px solid #3a3a3d',
+    backgroundColor: '#161618', color: '#fff', fontSize: 14, fontFamily: 'inherit', outline: 'none',
   },
   barTrack: { width: 320, height: 8, borderRadius: 4, backgroundColor: '#1a1b22', overflow: 'hidden' },
   barFill: { height: '100%', backgroundColor: GREEN, transition: 'width 0.2s' },

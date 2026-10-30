@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  collection, query, where, onSnapshot, addDoc, deleteDoc, doc,
+  collection, query, where, onSnapshot, addDoc, deleteDoc, doc, getDocs,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, auth } from '../firebase';
-import { CheckCircle2, Video, MonitorUp, Trash2, Send, Scissors, Upload, Film } from 'lucide-react';
+import { fetchLiveRecordings } from '../lib/stream';
+import { CheckCircle2, Video, MonitorUp, Radio, RefreshCw, Trash2, Send, Scissors, Upload, Film } from 'lucide-react';
 import VideoEditor from '../components/VideoEditor';
 import Panel from '../components/Panel';
 
@@ -17,6 +18,7 @@ const CSS = `
 const TABS = [
   { id: 'prontos', label: 'Prontos', icon: CheckCircle2 },
   { id: 'brutos', label: 'Brutos', icon: Video },
+  { id: 'lives', label: 'Lives', icon: Radio },
   { id: 'computador', label: 'Do Computador', icon: MonitorUp },
 ];
 
@@ -31,6 +33,9 @@ export default function Criar() {
   const [editorClips, setEditorClips] = useState(null); // null = editor fechado
   const [editorProject, setEditorProject] = useState(null); // projeto salvo aberto no editor
   const [projects, setProjects] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+  const syncedOnce = useRef(false);
 
   // ✅ Biblioteca pessoal de vídeos do criador (creator_videos) — separada
   // da coleção `posts`, que só recebe o vídeo quando ele efetivamente posta.
@@ -134,6 +139,63 @@ export default function Criar() {
     }
   };
 
+  // ✅ Busca no GetStream as gravações das lives e guarda na biblioteca (status 'live')
+  const syncLives = async () => {
+    if (!uid || syncing) return;
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const snap = await getDocs(query(collection(db, 'lives'), where('userId', '==', uid)));
+      const known = new Set(videos.map((v) => v.recordingKey).filter(Boolean));
+      let added = 0;
+      let waiting = 0;
+      for (const d of snap.docs) {
+        const live = d.data();
+        if (!live.recording) continue;
+        let recs = [];
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          recs = await fetchLiveRecordings(d.id);
+        } catch (err) {
+          console.warn('[Criar] gravações da live', d.id, err?.message);
+        }
+        if (!recs.length) waiting += 1;
+        for (const r of recs) {
+          const key = r.filename || r.url;
+          if (!r.url || known.has(key)) continue;
+          known.add(key);
+          const when = new Date(r.start_time || live.startedAt || live.createdAt || Date.now());
+          // eslint-disable-next-line no-await-in-loop
+          await addDoc(collection(db, 'creator_videos'), {
+            userId: uid,
+            status: 'live',
+            url: r.url,
+            liveId: d.id,
+            recordingKey: key,
+            originalName: `${live.title || 'Live'} - ${when.toLocaleDateString('pt-BR')}`,
+            createdAt: when.toISOString(),
+          });
+          added += 1;
+        }
+      }
+      if (added) setSyncMsg(`${added} gravação(ões) nova(s) adicionada(s).`);
+      else if (waiting) setSyncMsg('Gravação ainda sendo processada. Tente de novo em alguns minutos.');
+      else setSyncMsg('Nenhuma gravação nova.');
+    } catch (err) {
+      console.error('[Criar] Erro ao buscar gravações:', err);
+      setSyncMsg('Não foi possível buscar as gravações agora.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+  useEffect(() => {
+    if (activeTab === 'lives' && !syncedOnce.current && uid) {
+      syncedOnce.current = true;
+      syncLives();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, uid]);
+
   // ✅ Abre o editor com um bruto já salvo na nuvem
   const handleEditRaw = (video) => {
     setEditorClips([{ name: video.originalName || 'Vídeo', url: video.url }]);
@@ -151,7 +213,7 @@ export default function Criar() {
   };
 
   // ✅ Editor terminou de exportar: sobe o vídeo final pra "Prontos"
-  const handleExported = async (blob) => {
+  const handleExported = async (blob, exportName) => {
     try {
       const fileName = `${Date.now()}.mp4`;
       const storageRef = ref(storage, `creator_videos/${uid}/ready/${fileName}`);
@@ -163,7 +225,7 @@ export default function Criar() {
         status: 'ready',
         storagePath: storageRef.fullPath,
         url,
-        originalName: editorProject?.name || `Vídeo editado ${new Date().toLocaleDateString('pt-BR')}`,
+        originalName: exportName || editorProject?.name || `Vídeo editado ${new Date().toLocaleDateString('pt-BR')}`,
         createdAt: new Date().toISOString(),
       });
 
@@ -233,6 +295,38 @@ export default function Criar() {
                       <div style={styles.cardActions}>
                         <button style={styles.primaryBtn} onClick={() => handlePostarVideo(video)}>
                           <Send size={14} /> Postar
+                        </button>
+                        <button style={styles.iconBtn} onClick={() => handleDeleteVideo(video)}>
+                          <Trash2 size={16} color="#ff4444" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'lives' && (
+            <div>
+              <button type="button" style={styles.uploadRawBtn} onClick={syncLives} disabled={syncing}>
+                <RefreshCw size={18} />
+                {syncing ? 'Buscando...' : 'Buscar gravações das lives'}
+              </button>
+              {syncMsg && <p style={styles.emptyText}>{syncMsg}</p>}
+              {videos.filter((v) => v.status === 'live').length === 0 ? (
+                <p style={styles.emptyText}>
+                  Suas lives são gravadas automaticamente quando você vai ao vivo. Depois que terminarem, a gravação aparece aqui para você criar os highlights.
+                </p>
+              ) : (
+                <div style={styles.grid}>
+                  {videos.filter((v) => v.status === 'live').map((video) => (
+                    <div key={video.id} style={styles.card}>
+                      <video src={video.url} style={styles.cardVideo} muted />
+                      <p style={styles.cardName} title={videoName(video)}>{videoName(video)}</p>
+                      <div style={styles.cardActions}>
+                        <button style={styles.primaryBtn} onClick={() => handleEditRaw(video)}>
+                          <Scissors size={14} /> Editar
                         </button>
                         <button style={styles.iconBtn} onClick={() => handleDeleteVideo(video)}>
                           <Trash2 size={16} color="#ff4444" />

@@ -149,3 +149,16 @@ export function useLiveSession({ liveId, role, enabled, userName, userImage }) {
 
   return enabled ? state : IDLE;
 }
+
+/** Gravações de uma live (o GetStream guarda; links podem demorar alguns minutos para ficar prontos). */
+export async function fetchLiveRecordings(liveId) {
+  const user = auth.currentUser;
+  const client = StreamVideoClient.getOrCreateInstance({
+    apiKey: STREAM_API_KEY,
+    user: { id: user.uid },
+    tokenProvider: fetchStreamToken,
+  });
+  const call = client.call('livestream', `live_${liveId}`);
+  const res = await call.queryRecordings();
+  return res?.recordings || [];
+}

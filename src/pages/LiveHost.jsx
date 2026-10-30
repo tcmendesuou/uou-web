@@ -9,7 +9,7 @@ import { db, auth } from '../firebase';
 import { useLiveSession } from '../lib/stream';
 import { useLiveDoc, useLiveMessages, usePrizeClock, useRemainingSeconds } from '../lib/liveHooks';
 import {
-  DRAW_COUNTDOWN_SECONDS, prepareGoLive, refundGuarantee, markLiveStarted, finalizeLive, executePrizeDraw, deleteLive,
+  DRAW_COUNTDOWN_SECONDS, prepareGoLive, refundGuarantee, markLiveStarted, finalizeLive, executePrizeDraw, deleteLive, markLiveRecording,
 } from '../lib/liveLogic';
 import { LiveStage, HostControls } from '../components/LiveStage';
 import LiveChat from '../components/LiveChat';
@@ -148,6 +148,13 @@ export default function LiveHost() {
         return;
       }
       await markLiveStarted(liveId);
+      // Grava a live para o criador gerar highlights no editor (se falhar, a live segue normal)
+      try {
+        await session.call.startRecording();
+        await markLiveRecording(liveId);
+      } catch (recErr) {
+        console.warn('[LiveHost] gravação não iniciada:', recErr?.message);
+      }
     } catch (err) {
       console.error('[LiveHost] erro ao ir ao vivo:', err);
       setNotice('Não foi possível iniciar a transmissão. Tente novamente.');
