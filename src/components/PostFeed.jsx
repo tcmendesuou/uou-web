@@ -669,7 +669,7 @@ const styles = {
     border: '1px solid #52fa35',
     borderRadius: '12px',
     padding: '11px 0',
-    backgroundColor: 'rgba(82, 250, 53, 0.05)',
+    backgroundColor: 'rgba(82, 250, 53, 0.1)',
     color: '#52fa35',
     fontSize: '14px',
     fontWeight: '800',

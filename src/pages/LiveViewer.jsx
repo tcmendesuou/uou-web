@@ -384,7 +384,7 @@ const styles = {
     fontSize: 15,
     fontWeight: 800,
     fontFamily: 'inherit',
-    backgroundColor: busy ? '#1a1a1a' : 'rgba(82, 250, 53, 0.05)',
+    backgroundColor: busy ? '#1a1a1a' : 'rgba(82, 250, 53, 0.1)',
     color: busy ? '#555' : '#52fa35',
     cursor: busy ? 'default' : 'pointer',
   }),

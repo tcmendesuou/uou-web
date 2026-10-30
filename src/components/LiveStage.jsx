@@ -241,7 +241,7 @@ const styles = {
     padding: '0 22px',
     borderRadius: 12,
     border: busy ? '1px solid #1a1a1a' : `1px solid ${GREEN}`,
-    backgroundColor: busy ? '#1a1a1a' : 'rgba(82, 250, 53, 0.05)',
+    backgroundColor: busy ? '#1a1a1a' : 'rgba(82, 250, 53, 0.1)',
     color: busy ? '#555' : GREEN,
     fontSize: 15,
     fontWeight: 800,

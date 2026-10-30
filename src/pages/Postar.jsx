@@ -571,7 +571,7 @@ const styles = {
     padding: '10px 0',
     border: active ? '1px solid #52fa35' : '1px solid transparent',
     borderRadius: 9,
-    backgroundColor: active ? 'rgba(82, 250, 53, 0.05)' : 'transparent',
+    backgroundColor: active ? 'rgba(82, 250, 53, 0.1)' : 'transparent',
     color: active ? '#52fa35' : '#aaa',
     fontSize: 14,
     fontWeight: 700,
@@ -597,7 +597,7 @@ const styles = {
     margin: 0,
   },
   postButton: (enabled) => ({
-    backgroundColor: enabled ? 'rgba(82, 250, 53, 0.05)' : '#1a1a1a',
+    backgroundColor: enabled ? 'rgba(82, 250, 53, 0.1)' : '#1a1a1a',
     color: enabled ? '#52fa35' : '#555',
     border: enabled ? '1px solid #52fa35' : '1px solid #1a1a1a',
     borderRadius: 10,

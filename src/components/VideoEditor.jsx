@@ -955,14 +955,14 @@ const s = {
   ratioGroup: { display: 'flex', gap: 4, padding: 3, backgroundColor: '#111218', borderRadius: 10, border: '1px solid #1c1d25' },
   ratioBtn: (a) => ({
     border: a ? `1px solid ${GREEN}` : '1px solid transparent', borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-    backgroundColor: a ? 'rgba(82, 250, 53, 0.05)' : 'transparent', color: a ? GREEN : '#999', fontFamily: 'inherit',
+    backgroundColor: a ? 'rgba(82, 250, 53, 0.1)' : 'transparent', color: a ? GREEN : '#999', fontFamily: 'inherit',
   }),
   exportBtn: {
     justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 8, border: 'none', borderRadius: 10,
     padding: '9px 16px', backgroundColor: '#1a1b22', color: '#666', fontSize: 13, fontWeight: 700,
     cursor: 'not-allowed', fontFamily: 'inherit',
   },
-  exportBtnOn: { backgroundColor: 'rgba(82, 250, 53, 0.05)', color: GREEN, border: `1px solid ${GREEN}`, padding: '8px 15px', cursor: 'pointer' },
+  exportBtnOn: { backgroundColor: 'rgba(82, 250, 53, 0.1)', color: GREEN, border: `1px solid ${GREEN}`, padding: '8px 15px', cursor: 'pointer' },
   overlay: {
     position: 'absolute', inset: 0, zIndex: 20, backgroundColor: 'rgba(3,4,8,0.88)', display: 'flex',
     flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,
