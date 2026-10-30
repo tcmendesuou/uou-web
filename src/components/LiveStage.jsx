@@ -21,6 +21,9 @@ const GREEN = '#52fa35';
 const STAGE_CSS = `
 .uou-stage .str-video__participant-view { width:100%; height:100%; max-height:none; aspect-ratio:auto; background:#000; border-radius:0; }
 .uou-stage .str-video__video { object-fit:contain; }
+.uou-split .str-video__participant-view { width:100%; height:100%; aspect-ratio:auto; border-radius:0; }
+.uou-split .str-video__video { object-fit:cover; }
+.uou-split .str-video__participant-details, .uou-split .str-video__menu-container { display:none; }
 .uou-pip .str-video__participant-view { width:100%; height:100%; aspect-ratio:auto; border-radius:10px; }
 .uou-pip .str-video__video { object-fit:cover; }
 .uou-stage .str-video__participant-details, .uou-pip .str-video__participant-details,
@@ -62,21 +65,24 @@ export function LiveStage({ hostId, isHost = false, waitingText = 'Aguardando tr
   }
 
   return (
-    <div className="uou-stage" style={{ ...styles.stage, display: 'flex', gap: guests.length ? 6 : 0 }}>
+    <div className="uou-stage" style={{ ...styles.stage, ...gridFor(guests.length + 1) }}>
       <style>{STAGE_CSS}</style>
-      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>{body}</div>
-      {guests.length > 0 && (
-        <div style={styles.guestCol}>
-          {guests.map((p) => (
-            <div key={p.userId} className="uou-pip" style={styles.guestTile}>
-              <ParticipantView participant={p} trackType="videoTrack" />
-              <span style={styles.guestName}>{!hasAudio(p) && <MicOff size={11} />} {p.name}</span>
-            </div>
-          ))}
+      <div style={styles.tile}>{body}</div>
+      {guests.map((p) => (
+        <div key={p.userId} className="uou-split" style={styles.tile}>
+          <ParticipantView participant={p} trackType="videoTrack" />
+          <span style={styles.guestName}>{!hasAudio(p) && <MicOff size={11} />} {p.name}</span>
         </div>
-      )}
+      ))}
     </div>
   );
+}
+
+// Divide o palco em partes iguais: 1 = cheio, 2 = lado a lado, 3 = três colunas, 4 = quatro quadrantes
+function gridFor(n) {
+  if (n <= 1) return { display: 'block' };
+  const cols = n === 4 ? 2 : n;
+  return { display: 'grid', gap: 4, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: n === 4 ? 'minmax(0, 1fr)' : '1fr' };
 }
 
 /** Botões do criador: microfone, câmera, compartilhar tela, ir ao vivo/encerrar. */
@@ -188,8 +194,7 @@ const styles = {
     gap: 12,
   },
   placeholderText: { color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: 0 },
-  guestCol: { width: '24%', minWidth: 120, maxWidth: 220, display: 'flex', flexDirection: 'column', gap: 6 },
-  guestTile: { position: 'relative', flex: 1, minHeight: 0, borderRadius: 10, overflow: 'hidden', backgroundColor: '#111' },
+  tile: { position: 'relative', width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundColor: '#000' },
   guestName: {
     position: 'absolute', left: 6, bottom: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 4, color: '#fff', fontSize: 11, fontWeight: 700,
     textShadow: '0 1px 3px #000', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
