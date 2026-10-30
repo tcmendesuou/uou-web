@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { exportTimeline } from '../lib/editorExport';
+import { FILTERS, filterCss } from '../lib/editorFilters';
 import {
   X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
   Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight, Video, CheckCircle2, MonitorUp,
@@ -204,7 +205,7 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
     try {
       const payload = layout.map((c) => {
         const src = srcOf(c.srcId);
-        return { file: src.file || undefined, url: src.url, in: c.in, out: c.out };
+        return { file: src.file || undefined, url: src.url, in: c.in, out: c.out, filter: filterCss(c.filter) };
       });
       const blob = await exportTimeline(payload, {
         ratio: ratio.id,
@@ -370,6 +371,27 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
     setPlaying((p) => !p);
   };
 
+  // -------- filtros --------
+  const selectedClip = clips.find((c) => c.id === selected) || null;
+  const activeClip = layout.find((c) => time >= c.start && time < c.start + c.len) || layout[layout.length - 1] || null;
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.style.filter = filterCss(activeClip?.filter);
+  }, [activeClip]);
+  const applyFilter = (id) => {
+    if (!selectedClip) return;
+    const f = id === 'none' ? undefined : { id, amount: selectedClip.filter?.amount ?? 1 };
+    commit(clips.map((c) => (c.id === selectedClip.id ? { ...c, filter: f } : c)));
+  };
+  const applyFilterToAll = () => {
+    if (!selectedClip) return;
+    commit(clips.map((c) => ({ ...c, filter: selectedClip.filter })));
+  };
+  const startAmountDrag = () => { setPast((p) => [...p.slice(-49), clipsRef.current]); setFuture([]); };
+  const setAmount = (amount) => {
+    if (!selectedClip?.filter) return;
+    setClips(clipsRef.current.map((c) => (c.id === selectedClip.id ? { ...c, filter: { ...c.filter, amount } } : c)));
+  };
+
   // -------- edição --------
   const splitAtPlayhead = () => {
     const t = timeRef.current;
@@ -377,8 +399,8 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
     if (idx === -1) return;
     const c = layout[idx];
     const cut = c.in + (t - c.start);
-    const a = { id: newId(), srcId: c.srcId, in: c.in, out: cut };
-    const b = { id: newId(), srcId: c.srcId, in: cut, out: c.out };
+    const a = { id: newId(), srcId: c.srcId, in: c.in, out: cut, filter: c.filter };
+    const b = { id: newId(), srcId: c.srcId, in: cut, out: c.out, filter: c.filter };
     const next = clips.slice();
     next.splice(idx, 1, a, b);
     commit(next);
@@ -600,7 +622,42 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
               );
             })}
           </div>
-          {tool && (
+          {tool === 'filtros' && (
+            <div style={s.toolInfo}>
+              <b>Filtros</b>
+              {!selectedClip ? (
+                <p style={{ ...s.hint, marginTop: 6 }}>Clique em um clipe na linha do tempo para aplicar um filtro.</p>
+              ) : (
+                <>
+                  <div style={s.filterGrid}>
+                    {FILTERS.map((f) => {
+                      const on = (selectedClip.filter?.id || 'none') === f.id;
+                      const thumb = srcOf(selectedClip.srcId)?.thumbs?.[0];
+                      return (
+                        <button key={f.id} type="button" style={s.filterBtn(on)} onClick={() => applyFilter(f.id)}>
+                          <span style={{ ...s.filterThumb, backgroundImage: thumb ? `url(${thumb})` : 'none', filter: filterCss({ id: f.id, amount: 1 }) }} />
+                          <span style={s.filterName}>{f.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedClip.filter && (
+                    <label style={s.amountRow}>
+                      <span style={s.hint}>Intensidade</span>
+                      <input
+                        type="range" min="0" max="1" step="0.01" style={{ flex: 1, minWidth: 0, width: '100%', accentColor: GREEN }}
+                        value={selectedClip.filter.amount ?? 1}
+                        onPointerDown={startAmountDrag}
+                        onChange={(e) => setAmount(Number(e.target.value))}
+                      />
+                    </label>
+                  )}
+                  <button type="button" style={s.applyAll} onClick={applyFilterToAll}>Aplicar em todos os clipes</button>
+                </>
+              )}
+            </div>
+          )}
+          {tool && tool !== 'filtros' && (
             <div style={s.toolInfo}>
               <b>{TOOLS.find((t) => t.id === tool).label}</b>
               <p style={s.hint}>Entra nas próximas etapas do editor.</p>
@@ -818,6 +875,18 @@ const s = {
     cursor: 'pointer', fontFamily: 'inherit',
   }),
   toolLabel: { fontSize: 11, color: '#ccc', fontWeight: 600 },
+  filterGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 10 },
+  filterBtn: (a) => ({
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 4, borderRadius: 8, cursor: 'pointer',
+    border: a ? `1px solid ${GREEN}` : '1px solid #1a1b22', backgroundColor: a ? 'rgba(82,250,53,0.08)' : 'transparent', fontFamily: 'inherit',
+  }),
+  filterThumb: { width: '100%', aspectRatio: '1 / 1', borderRadius: 6, backgroundColor: '#222', backgroundSize: 'cover', backgroundPosition: 'center' },
+  filterName: { fontSize: 10, color: '#ccc', fontWeight: 600 },
+  amountRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 },
+  applyAll: {
+    marginTop: 12, width: '100%', padding: '8px 0', borderRadius: 8, border: '1px solid #2a2b35', backgroundColor: '#15161c',
+    color: '#ddd', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+  },
   toolInfo: { padding: 12, borderRadius: 10, backgroundColor: '#0d0e13', border: '1px solid #1a1b22', fontSize: 13 },
   shortcuts: { marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #15161c' },
   sc: { color: '#8a8b95', fontSize: 11.5, margin: '5px 0' },

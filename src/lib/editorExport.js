@@ -30,7 +30,7 @@ function sliceBuffer(buffer, from, to) {
 }
 
 /**
- * @param {Array<{ file?: File, url?: string, in: number, out: number }>} clips  clipes na ordem final
+ * @param {Array<{ file?: File, url?: string, in: number, out: number, filter?: string }>} clips  clipes na ordem final
  * @param {{ ratio?: string, onProgress?: (p:number)=>void, signal?: { cancelled: boolean } }} opts
  * @returns {Promise<Blob>} MP4
  */
@@ -118,9 +118,12 @@ export async function exportTimeline(clips, opts = {}) {
     for await (const frame of sink.canvases(clip.in, clip.out)) {
       if (signal.cancelled) throw new Error('cancelado');
       const local = Math.max(0, frame.timestamp - clip.in);
+      ctx.filter = 'none';
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
+      ctx.filter = clip.filter || 'none';
       ctx.drawImage(frame.canvas, 0, 0, width, height);
+      ctx.filter = 'none';
       const duration = Math.max(0.001, Math.min(frame.duration || 1 / 30, len - local));
       await videoSource.add(offset + local, duration);
       onProgress(Math.min(0.97, (offset + local) / total));
