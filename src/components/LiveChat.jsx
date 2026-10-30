@@ -3,6 +3,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 import { sendLiveMessage } from '../lib/liveLogic';
 
+// Cada pessoa ganha sempre a mesma cor (calculada a partir do id/nome)
+const NAME_COLORS = ['#52fa35', '#4da6ff', '#ffd700', '#ff7ac8', '#ff9f43', '#b388ff', '#2ee6d6', '#ff6b6b', '#c6f432', '#7fb8ff'];
+const colorFor = (key) => {
+  let h = 0;
+  for (const ch of String(key || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return NAME_COLORS[h % NAME_COLORS.length];
+};
+
 export default function LiveChat({ liveId, userName, messages, disabled = false }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -33,7 +41,7 @@ export default function LiveChat({ liveId, userName, messages, disabled = false 
         {messages.length === 0 && <p style={styles.empty}>Seja o primeiro a comentar.</p>}
         {messages.map((m) => (
           <p key={m.id} style={styles.msg}>
-            <span style={styles.user}>{m.userName || 'Usuário'}: </span>
+            <span style={{ ...styles.user, color: colorFor(m.userId || m.userName) }}>{m.userName || 'Usuário'}: </span>
             {m.text}
           </p>
         ))}

@@ -98,6 +98,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
     }
   };
   const cancelInvite = (uid) => updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status: 'canceled' }).catch(() => {});
+  const askUnmute = (uid) => updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { unmuteRequestAt: Date.now() }).catch((e) => console.error(e));
   const mute = async (uid) => {
     try { await call.muteUser(uid, 'audio'); } catch (err) { setError('Não foi possível silenciar agora.'); console.warn(err); }
   };
@@ -124,7 +125,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
           <div key={uid} style={s.row}>
             <span style={s.name}>{nameOf(uid)}{!online && <i style={{ color: '#777' }}> (fora da live)</i>}</span>
             {muted ? (
-              <button type="button" style={{ ...s.iconBtn, color: '#ff6b6b', borderColor: '#4a1a1a', backgroundColor: '#2a1212', cursor: 'default' }} title="Microfone desligado" disabled><MicOff size={15} /></button>
+              <button type="button" style={{ ...s.iconBtn, color: '#ff6b6b', borderColor: '#4a1a1a', backgroundColor: '#2a1212' }} title="Microfone desligado. Clique para pedir que ele ligue" onClick={() => askUnmute(uid)}><MicOff size={15} /></button>
             ) : (
               <button type="button" style={{ ...s.iconBtn, color: GREEN, borderColor: 'rgba(82,250,53,0.4)' }} title="Silenciar" onClick={() => mute(uid)}><Mic size={15} /></button>
             )}
@@ -180,6 +181,7 @@ export function GuestViewerBar({ liveId }) {
   const [inv, setInv] = useState(null);
   const startedRef = useRef(false);
   const [err, setErr] = useState('');
+  const [dismissedAsk, setDismissedAsk] = useState(0);
 
   useEffect(() => {
     if (!uid || !liveId) return undefined;
@@ -188,6 +190,8 @@ export function GuestViewerBar({ liveId }) {
 
   const status = inv?.status;
   const onStage = status === 'onstage';
+  const askAt = inv?.unmuteRequestAt || 0;
+  const showAsk = onStage && !micOn && askAt > dismissedAsk && Date.now() - askAt < 5 * 60 * 1000;
 
   useEffect(() => {
     if (!call) return;
@@ -234,6 +238,16 @@ export function GuestViewerBar({ liveId }) {
   }
   if (onStage) {
     return (
+      <>
+      {showAsk && (
+        <div style={{ ...g.banner, top: 12 }}>
+          <p style={g.bannerText}>O criador pediu para você ligar o microfone.</p>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" style={g.accept} onClick={() => { call.microphone.enable().catch(() => {}); setDismissedAsk(askAt); }}>Ligar</button>
+            <button type="button" style={g.refuse} onClick={() => setDismissedAsk(askAt)}>Agora não</button>
+          </div>
+        </div>
+      )}
       <div style={g.controls}>
         <span style={g.badge}>Você está no palco</span>
         {err && <span style={{ color: '#ff6b6b', fontSize: 11 }}>{err}</span>}
@@ -241,6 +255,7 @@ export function GuestViewerBar({ liveId }) {
         <button type="button" style={g.round(!camOn)} onClick={() => call.camera.toggle().catch(() => {})} title="Câmera">{camOn ? <Video size={18} /> : <VideoOff size={18} />}</button>
         <button type="button" style={g.leave} onClick={() => answer('left')}><LogOut size={15} /> Sair do palco</button>
       </div>
+      </>
     );
   }
   return null;
