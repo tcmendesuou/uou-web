@@ -5,11 +5,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import Panel from '../components/Panel';
+import { usePanelLayout } from '../lib/panelLayout';
 import { Users, Image as ImageIcon, Radio, Heart, Trophy, MessageCircle, Lock, Video as VideoIcon } from 'lucide-react';
 
 const GREEN = '#52fa35';
 const GOLD = '#FFD700';
 const DAY = 24 * 60 * 60 * 1000;
+
+// Lugares do mosaico (veja o CSS no fim do arquivo) — cada painel pode ser arrastado para outro lugar
+const SLOTS = ['chart', 'k1', 'k2', 'k3', 'k4', 'tl', 'tp', 'b1', 'b2', 'b3'];
 
 const PERIODS = [
   { id: '7', label: '7 dias', days: 7 },
@@ -32,6 +37,7 @@ const startOfDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); ret
 
 export default function Dashboard() {
   const uid = auth.currentUser?.uid;
+  const { order, dragProps, reset, changed } = usePanelLayout('uou_dash_layout_v1', SLOTS);
   const [period, setPeriod] = useState('30');
   const [state, setState] = useState({ loading: true, error: false, follows: [], posts: [], lives: [] });
 
@@ -114,25 +120,9 @@ export default function Dashboard() {
     };
   }, [state, period]);
 
-  return (
-    <div className="uou-dash">
-      <style>{CSS}</style>
-
-      <div style={s.header}>
-        <h1 style={s.title}>Dashboard</h1>
-        <div style={s.periods}>
-          {PERIODS.map((p) => (
-            <button key={p.id} type="button" style={s.periodBtn(period === p.id)} onClick={() => setPeriod(p.id)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {state.error && <p style={s.error}>Não foi possível carregar seus dados agora. Tente recarregar a página.</p>}
-
-      <div className="uou-grid" style={{ opacity: state.loading ? 0.5 : 1 }}>
-        <Panel area="chart" title="Crescimento de seguidores">
+  const blocks = {
+    chart: { title: 'Crescimento de seguidores', body: (
+      <>
           <div style={s.bigRow}>
             <span style={s.bigNum}>{num(m.followers)}</span>
             <span style={s.delta}>{m.hasHistory ? `+${num(m.newFollowers)} no período` : ''}</span>
@@ -146,14 +136,10 @@ export default function Dashboard() {
                 : 'Os seguidores atuais não têm a data em que começaram a seguir, então ainda não dá para desenhar a curva de crescimento.'}
             </p>
           )}
-        </Panel>
-
-        <Kpi area="k1" title="Seguidores" icon={Users} value={num(m.followers)} note={m.hasHistory ? `+${num(m.newFollowers)} no período` : 'total'} />
-        <Kpi area="k2" title="Posts" icon={ImageIcon} value={num(m.posts)} note={`+${num(m.newPosts)} no período`} />
-        <Kpi area="k3" title="Lives" icon={Radio} value={num(m.lives)} note={`+${num(m.newLives)} no período`} />
-        <Kpi area="k4" title="Curtidas" icon={Heart} value={num(m.likesTotal)} note={`média de ${m.avgLikes.toFixed(1).replace('.', ',')} por post`} />
-
-        <Panel area="tl" title="Lives com mais espectadores">
+      </>
+    ) },
+    tl: { title: 'Lives com mais espectadores', body: (
+      <>
           <Ranking
             empty="Quando você fizer lives, as mais assistidas aparecem aqui."
             items={m.topLives.map((l) => ({
@@ -162,9 +148,10 @@ export default function Dashboard() {
               value: Number(l.viewers) || 0, icon: Users,
             }))}
           />
-        </Panel>
-
-        <Panel area="tp" title="Posts com mais curtidas">
+      </>
+    ) },
+    tp: { title: 'Posts com mais curtidas', body: (
+      <>
           <Ranking
             empty="Quando você postar, os posts mais curtidos aparecem aqui."
             items={m.topPosts.map((p) => ({
@@ -173,9 +160,10 @@ export default function Dashboard() {
               sub: `${num(p.commentsCount)} comentários`, value: Number(p.likes) || 0, icon: Heart,
             }))}
           />
-        </Panel>
-
-        <Panel area="b1" title="Conteúdo">
+      </>
+    ) },
+    b1: { title: 'Conteúdo', body: (
+      <>
           <Bars
             rows={[
               { label: 'Fotos', value: m.byType.photo, icon: ImageIcon },
@@ -184,47 +172,75 @@ export default function Dashboard() {
               { label: 'Exclusivos', value: m.exclusive, icon: Lock },
             ]}
           />
-        </Panel>
-
-        <Panel area="b2" title="Engajamento">
+      </>
+    ) },
+    b2: { title: 'Engajamento', body: (
+      <>
           <Stat label="Curtidas" value={num(m.likesTotal)} icon={Heart} />
           <Stat label="Comentários" value={num(m.commentsTotal)} icon={MessageCircle} />
           <Stat label="Curtidas por post" value={m.avgLikes.toFixed(1).replace('.', ',')} icon={Trophy} />
-        </Panel>
-
-        <Panel area="b3" title="Resumo de lives">
+      </>
+    ) },
+    b3: { title: 'Resumo de lives', body: (
+      <>
           <Stat label="Ao vivo agora" value={num(m.liveStatus.live)} icon={Radio} />
           <Stat label="Agendadas" value={num(m.liveStatus.scheduled)} icon={Radio} />
           <Stat label="Encerradas" value={num(m.liveStatus.ended)} icon={Radio} />
           <Stat label="Premiadas" value={num(m.liveStatus.premium)} icon={Trophy} gold />
           <Stat label="Espectadores por live" value={m.avgViewers.toFixed(1).replace('.', ',')} icon={Users} />
-        </Panel>
+      </>
+    ) },
+    k1: { title: 'Seguidores', body: <KpiBody icon={Users} value={num(m.followers)} note={m.hasHistory ? `+${num(m.newFollowers)} no período` : 'total'} /> },
+    k2: { title: 'Posts', body: <KpiBody icon={ImageIcon} value={num(m.posts)} note={`+${num(m.newPosts)} no período`} /> },
+    k3: { title: 'Lives', body: <KpiBody icon={Radio} value={num(m.lives)} note={`+${num(m.newLives)} no período`} /> },
+    k4: { title: 'Curtidas', body: <KpiBody icon={Heart} value={num(m.likesTotal)} note={`média de ${m.avgLikes.toFixed(1).replace('.', ',')} por post`} /> },
+  };
+
+  return (
+    <div className="uou-dash">
+      <style>{CSS}</style>
+
+      <div style={s.header}>
+        <h1 style={s.title}>Dashboard</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {changed && (
+            <button type="button" style={s.resetBtn} onClick={reset}>Restaurar layout</button>
+          )}
+        <div style={s.periods}>
+          {PERIODS.map((p) => (
+            <button key={p.id} type="button" style={s.periodBtn(period === p.id)} onClick={() => setPeriod(p.id)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        </div>
+      </div>
+
+      {state.error && <p style={s.error}>Não foi possível carregar seus dados agora. Tente recarregar a página.</p>}
+
+      <div className="uou-grid" style={{ opacity: state.loading ? 0.5 : 1 }}>
+        {SLOTS.map((slot, i) => {
+          const id = order[i];
+          return (
+            <Panel key={id} area={slot} title={blocks[id].title} drag={dragProps(id)}>
+              {blocks[id].body}
+            </Panel>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function Panel({ area, title, children }) {
+function KpiBody({ icon: Icon, value, note }) {
   return (
-    <section className="uou-panel" style={{ gridArea: area }}>
-      <header style={s.panelHead}>
-        <span style={s.panelTab}>{title}</span>
-        <span style={s.panelMenu} aria-hidden>≡</span>
-      </header>
-      <div style={s.panelBody}>{children}</div>
-    </section>
-  );
-}
-
-function Kpi({ area, title, icon: Icon, value, note }) {
-  return (
-    <Panel area={area} title={title}>
+    <>
       <div style={s.kpiTop}>
         <Icon size={18} color={GREEN} />
         <span style={s.kpiValue}>{value}</span>
       </div>
       <p style={s.kpiNote}>{note}</p>
-    </Panel>
+    </>
   );
 }
 
@@ -341,7 +357,6 @@ const CSS = `
    "tl tl tl tl tl tp tp tp tp tp tp tp"
    "tl tl tl tl tl tp tp tp tp tp tp tp"
    "b1 b1 b1 b1 b2 b2 b2 b2 b3 b3 b3 b3";}
-.uou-panel{background:#1b1b1d;border-radius:3px;min-width:0;display:flex;flex-direction:column;overflow:hidden}
 @media (max-width:1100px){
  .uou-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"chart chart" "k1 k2" "k3 k4" "tl tl" "tp tp" "b1 b2" "b3 b3"}
 }
@@ -358,14 +373,11 @@ const s = {
     border: a ? `1px solid ${GREEN}` : '1px solid transparent', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 700,
     cursor: 'pointer', fontFamily: 'inherit', backgroundColor: a ? 'rgba(82, 250, 53, 0.1)' : 'transparent', color: a ? GREEN : '#999',
   }),
-  error: { color: '#ff6b6b', fontSize: 13, margin: '0 0 10px 0' },
-  panelHead: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', height: 34, flexShrink: 0,
-    borderBottom: '1px solid #2a2a2d',
+  resetBtn: {
+    border: '1px solid #2a2a2d', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    fontFamily: 'inherit', backgroundColor: 'transparent', color: '#aaa',
   },
-  panelTab: { color: '#e6e6e6', fontSize: 12, fontWeight: 600, height: 34, lineHeight: '34px', borderBottom: '2px solid #e6e6e6', boxSizing: 'border-box' },
-  panelMenu: { color: '#777', fontSize: 14 },
-  panelBody: { padding: 14, flex: 1, minHeight: 0, overflow: 'auto' },
+  error: { color: '#ff6b6b', fontSize: 13, margin: '0 0 10px 0' },
   bigRow: { display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 },
   bigNum: { color: '#fff', fontSize: 34, fontWeight: 800 },
   delta: { color: GREEN, fontSize: 13, fontWeight: 600 },

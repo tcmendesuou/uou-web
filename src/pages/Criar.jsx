@@ -7,6 +7,12 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { db, storage, auth } from '../firebase';
 import { CheckCircle2, Video, MonitorUp, Trash2, Send, Scissors, Upload, Film } from 'lucide-react';
 import VideoEditor from '../components/VideoEditor';
+import Panel from '../components/Panel';
+
+const CSS = `
+.uou-edit-grid{display:grid;gap:4px;grid-template-columns:300px minmax(0,1fr);grid-template-areas:"proj lib";height:calc(100vh - 190px);min-height:520px}
+@media (max-width:900px){.uou-edit-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"lib" "proj";height:auto}}
+`;
 
 const TABS = [
   { id: 'prontos', label: 'Prontos', icon: CheckCircle2 },
@@ -175,131 +181,124 @@ export default function Criar() {
 
   return (
     <div style={styles.container}>
+      <style>{CSS}</style>
       <div style={styles.titleRow}>
-        <h1 style={{ ...styles.pageTitle, margin: 0 }}>Criar</h1>
+        <h1 style={{ ...styles.pageTitle, margin: 0 }}>Editar</h1>
         <button style={styles.openEditorBtn} onClick={() => setEditorClips([])}>
           <Scissors size={16} /> Abrir editor
         </button>
       </div>
 
-      <div style={styles.tabsRow}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            style={{ ...styles.tabButton, ...(activeTab === tab.id ? styles.tabButtonActive : {}) }}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <tab.icon size={16} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'prontos' && (
-        <div>
-          {prontos.length === 0 ? (
-            <p style={styles.emptyText}>Nenhum vídeo pronto ainda. Edite um bruto ou importe do computador.</p>
+      <div className="uou-edit-grid">
+        <Panel area="proj" title="Projetos em andamento">
+          {projects.length === 0 ? (
+            <p style={styles.emptyText}>Seus projetos de edição aparecem aqui para você continuar depois.</p>
           ) : (
-            <div style={styles.grid}>
-              {prontos.map((video) => (
-                <div key={video.id} style={styles.card}>
-                  <video src={video.url} style={styles.cardVideo} controls />
-                  <div style={styles.cardActions}>
-                    <button style={styles.primaryBtn} onClick={() => handlePostarVideo(video)}>
-                      <Send size={14} /> Postar
-                    </button>
-                    <button style={styles.iconBtn} onClick={() => handleDeleteVideo(video)}>
-                      <Trash2 size={16} color="#ff4444" />
-                    </button>
-                  </div>
+            <div style={styles.projectList}>
+              {projects.map((p) => (
+                <div key={p.id} style={styles.projectRow}>
+                  <button style={styles.projectOpen} onClick={() => { setEditorClips(null); setEditorProject(p); }}>
+                    <div style={{ ...styles.projectThumb, backgroundImage: p.thumb ? `url("${p.thumb}")` : 'none' }}>
+                      {!p.thumb && <Film size={18} color="#444" />}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={styles.projectName}>{p.name || 'Projeto sem título'}</p>
+                      <p style={styles.projectMeta}>
+                        {Math.round(p.duration || 0)}s · {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('pt-BR') : ''}
+                      </p>
+                    </div>
+                  </button>
+                  <button style={styles.iconBtn} onClick={() => handleDeleteProject(p)} aria-label="Excluir projeto">
+                    <Trash2 size={15} color="#ff4444" />
+                  </button>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      )}
+        </Panel>
 
-      {activeTab === 'brutos' && (
-        <div>
-          <label style={styles.uploadRawBtn}>
-            <Upload size={18} />
-            {uploadingRaw ? 'Enviando...' : 'Adicionar vídeo bruto'}
-            <input
-              type="file"
-              accept="video/*"
-              onChange={handleUploadRaw}
-              disabled={uploadingRaw}
-              style={styles.hiddenInput}
-            />
-          </label>
-
-          {brutos.length === 0 ? (
-            <p style={styles.emptyText}>Nenhum vídeo bruto salvo ainda.</p>
-          ) : (
-            <div style={styles.grid}>
-              {brutos.map((video) => (
-                <div key={video.id} style={styles.card}>
-                  <video src={video.url} style={styles.cardVideo} muted />
-                  <div style={styles.cardActions}>
-                    <button style={styles.primaryBtn} onClick={() => handleEditRaw(video)}>
-                      <Scissors size={14} /> Editar
-                    </button>
-                    <button style={styles.iconBtn} onClick={() => handleDeleteVideo(video)}>
-                      <Trash2 size={16} color="#ff4444" />
-                    </button>
-                  </div>
+        <Panel area="lib" tabs={TABS} activeTab={activeTab} onTab={setActiveTab}>
+          {activeTab === 'prontos' && (
+            <div>
+              {prontos.length === 0 ? (
+                <p style={styles.emptyText}>Nenhum vídeo pronto ainda. Edite um bruto ou importe do computador.</p>
+              ) : (
+                <div style={styles.grid}>
+                  {prontos.map((video) => (
+                    <div key={video.id} style={styles.card}>
+                      <video src={video.url} style={styles.cardVideo} controls />
+                      <div style={styles.cardActions}>
+                        <button style={styles.primaryBtn} onClick={() => handlePostarVideo(video)}>
+                          <Send size={14} /> Postar
+                        </button>
+                        <button style={styles.iconBtn} onClick={() => handleDeleteVideo(video)}>
+                          <Trash2 size={16} color="#ff4444" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
-        </div>
-      )}
 
-      {activeTab === 'computador' && (
-        <div style={styles.computerTab}>
-          <MonitorUp size={40} color="#52fa35" style={{ marginBottom: 14 }} />
-          <p style={styles.computerText}>
-            Escolha um ou mais vídeos do seu computador pra editar agora. Nada é
-            enviado pra nuvem até você exportar o resultado final.
-          </p>
-          <label style={styles.uploadRawBtn}>
-            <MonitorUp size={18} />
-            Escolher vídeos
-            <input
-              type="file"
-              accept="video/*"
-              multiple
-              onChange={handlePickFromComputer}
-              style={styles.hiddenInput}
-            />
-          </label>
-        </div>
-      )}
+          {activeTab === 'brutos' && (
+            <div>
+              <label style={styles.uploadRawBtn}>
+                <Upload size={18} />
+                {uploadingRaw ? 'Enviando...' : 'Adicionar vídeo bruto'}
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleUploadRaw}
+                  disabled={uploadingRaw}
+                  style={styles.hiddenInput}
+                />
+              </label>
 
-      <div style={styles.projectsBox}>
-        <p style={styles.projectsTitle}><Film size={15} color="#52fa35" /> Projetos em andamento</p>
-        {projects.length === 0 ? (
-          <p style={{ ...styles.emptyText, margin: 0 }}>Seus projetos de edição aparecem aqui para você continuar depois.</p>
-        ) : (
-          <div style={styles.projectsRow}>
-            {projects.map((p) => (
-              <div key={p.id} style={styles.projectCard}>
-                <button style={styles.projectOpen} onClick={() => { setEditorClips(null); setEditorProject(p); }}>
-                  <div style={{ ...styles.projectThumb, backgroundImage: p.thumb ? `url(${p.thumb})` : 'none' }}>
-                    {!p.thumb && <Film size={22} color="#333" />}
-                  </div>
-                  <span style={styles.projectName}>{p.name || 'Projeto sem título'}</span>
-                  <span style={styles.projectMeta}>
-                    {Math.round(p.duration || 0)}s · {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('pt-BR') : ''}
-                  </span>
-                </button>
-                <button style={styles.projectDelete} onClick={() => handleDeleteProject(p)} aria-label="Excluir projeto">
-                  <Trash2 size={14} color="#ff4444" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+              {brutos.length === 0 ? (
+                <p style={styles.emptyText}>Nenhum vídeo bruto salvo ainda.</p>
+              ) : (
+                <div style={styles.grid}>
+                  {brutos.map((video) => (
+                    <div key={video.id} style={styles.card}>
+                      <video src={video.url} style={styles.cardVideo} muted />
+                      <div style={styles.cardActions}>
+                        <button style={styles.primaryBtn} onClick={() => handleEditRaw(video)}>
+                          <Scissors size={14} /> Editar
+                        </button>
+                        <button style={styles.iconBtn} onClick={() => handleDeleteVideo(video)}>
+                          <Trash2 size={16} color="#ff4444" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'computador' && (
+            <div style={styles.computerTab}>
+              <MonitorUp size={40} color="#52fa35" style={{ marginBottom: 14 }} />
+              <p style={styles.computerText}>
+                Escolha um ou mais vídeos do seu computador pra editar agora. Nada é
+                enviado pra nuvem até você exportar o resultado final.
+              </p>
+              <label style={styles.uploadRawBtn}>
+                <MonitorUp size={18} />
+                Escolher vídeos
+                <input
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  onChange={handlePickFromComputer}
+                  style={styles.hiddenInput}
+                />
+              </label>
+            </div>
+          )}
+        </Panel>
       </div>
 
       {(editorClips || editorProject) && (
@@ -318,7 +317,7 @@ export default function Criar() {
 const styles = {
   container: {
     fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
-    maxWidth: 900,
+    maxWidth: 1300,
     margin: '0 auto',
   },
   titleRow: {
@@ -346,87 +345,18 @@ const styles = {
     fontWeight: 700,
     margin: '0 0 20px 0',
   },
-  tabsRow: {
-    display: 'flex',
-    gap: 10,
-    marginBottom: 24,
-    borderBottom: '1px solid #1a1a1a',
-    paddingBottom: 16,
-  },
-  tabButton: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '8px 16px',
-    borderRadius: 20,
-    border: 'none',
-    backgroundColor: 'transparent',
-    color: '#999',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  tabButtonActive: {
-    backgroundColor: 'rgba(82,250,53,0.12)',
-    color: '#52fa35',
-  },
-  projectsBox: {
-    marginTop: 28,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: '#0d0e13',
-    border: '1px solid #1a1b22',
-  },
-  projectsTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    margin: '0 0 12px 0',
-    color: '#f0f0f0',
-    fontSize: 13,
-    fontWeight: 700,
-  },
-  projectsRow: { display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 },
-  projectCard: { position: 'relative', flexShrink: 0, width: 130 },
+  projectList: { display: 'flex', flexDirection: 'column', gap: 4 },
+  projectRow: { display: 'flex', alignItems: 'center', gap: 4, padding: '4px 4px 4px 0', borderRadius: 6, backgroundColor: '#222224' },
   projectOpen: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    width: '100%',
-    padding: 0,
-    border: 'none',
-    background: 'none',
-    cursor: 'pointer',
-    textAlign: 'left',
-    fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0, padding: 6, border: 'none', background: 'none',
+    cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
   },
   projectThumb: {
-    width: '100%',
-    aspectRatio: '1 / 1',
-    borderRadius: 10,
-    backgroundColor: '#15161c',
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 42, height: 42, borderRadius: 6, backgroundColor: '#2f2f33', backgroundSize: 'cover', backgroundPosition: 'center',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  projectName: { color: '#f0f0f0', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  projectMeta: { color: '#777', fontSize: 11 },
-  projectDelete: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 26,
-    height: 26,
-    borderRadius: '50%',
-    border: 'none',
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  },
+  projectName: { color: '#f0f0f0', fontSize: 13, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  projectMeta: { color: '#777', fontSize: 11, margin: '2px 0 0 0' },
   emptyText: {
     color: '#666',
     fontSize: 13,
@@ -438,9 +368,8 @@ const styles = {
     gap: 16,
   },
   card: {
-    backgroundColor: '#0d0d0d',
-    border: '1px solid #1a1a1a',
-    borderRadius: 12,
+    backgroundColor: '#222224',
+    borderRadius: 6,
     overflow: 'hidden',
   },
   cardVideo: {
@@ -483,10 +412,10 @@ const styles = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    borderRadius: 10,
-    padding: '12px 20px',
+    backgroundColor: '#2a2a2d',
+    border: '1px solid #3a3a3d',
+    borderRadius: 8,
+    padding: '10px 18px',
     color: '#f0f0f0',
     fontSize: 13,
     fontWeight: 600,
