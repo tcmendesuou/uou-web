@@ -8,6 +8,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { db, auth, storage } from '../firebase';
 import { exportTimeline } from '../lib/editorExport';
 import { FILTERS, filterCss } from '../lib/editorFilters';
+import { TEXT_FONTS, TEXT_STYLES, TEXT_ANIMS, TEXT_COLORS, makeText, textState, textCss } from '../lib/editorText';
 import { TRANSITIONS, DEFAULT_TRANSITION_SECONDS, transitionAt, effectParams, cssFor } from '../lib/editorTransitions';
 import {
   X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
@@ -81,6 +82,7 @@ function PanelHead({ title, inset = false }) {
 const libraryFromProject = (project) => {
   const media = project?.media || [];
   (project?.clips || []).forEach((c) => { if (c.id >= idCounter) idCounter = c.id + 1; });
+  (project?.texts || []).forEach((c) => { if (c.id >= idCounter) idCounter = c.id + 1; });
   media.forEach((m) => { if (m.id >= idCounter) idCounter = m.id + 1; });
   return media.map((m) => ({
     id: m.id, name: m.name, url: m.url, file: null, duration: m.duration || 0, thumbs: [], step: m.duration || 1, storagePath: m.storagePath,
@@ -102,6 +104,8 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const [past, setPast] = useState([]);
   const [future, setFuture] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [texts, setTexts] = useState(() => (project?.texts || []).map((t) => ({ ...t })));
+  const [selectedText, setSelectedText] = useState(null);
   const [time, setTime] = useState(0); // posição na linha do tempo (s)
   const [playing, setPlaying] = useState(false);
   const [pps, setPps] = useState(70); // pixels por segundo (zoom)
@@ -117,6 +121,8 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const libRef = useRef(library); libRef.current = library;
   const cloudRef = useRef([]); cloudRef.current = cloud;
   const clipsRef = useRef(clips); clipsRef.current = clips;
+  const textsRef = useRef(texts); textsRef.current = texts;
+  const screenRef = useRef(null);
   const timeRef = useRef(0);
   const nameRef = useRef(name); nameRef.current = name;
   const ratioRef = useRef(ratio); ratioRef.current = ratio;
@@ -141,24 +147,26 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const srcOf = (srcId) => libRef.current.find((l) => l.id === srcId);
 
   // -------- histórico (desfazer / refazer) --------
+  const snap = () => ({ clips: clipsRef.current, texts: textsRef.current });
+  const restore = (h) => { setClips(h.clips); setTexts(h.texts); };
   const commit = useCallback((next) => {
-    setPast((p) => [...p.slice(-49), clipsRef.current]);
+    setPast((p) => [...p.slice(-49), { clips: clipsRef.current, texts: textsRef.current }]);
     setFuture([]);
     setClips(next);
   }, []);
   const undo = () => {
     setPast((p) => {
       if (!p.length) return p;
-      setFuture((f) => [clipsRef.current, ...f]);
-      setClips(p[p.length - 1]);
+      setFuture((f) => [snap(), ...f]);
+      restore(p[p.length - 1]);
       return p.slice(0, -1);
     });
   };
   const redo = () => {
     setFuture((f) => {
       if (!f.length) return f;
-      setPast((p) => [...p, clipsRef.current]);
-      setClips(f[0]);
+      setPast((p) => [...p, snap()]);
+      restore(f[0]);
       return f.slice(1);
     });
   };
@@ -262,6 +270,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         name: nameRef.current.trim() || 'Projeto sem título',
         ratio: ratioRef.current.id,
         clips: clipsRef.current.map((c) => ({ id: c.id, srcId: c.srcId, in: c.in, out: c.out, filter: c.filter, transition: c.transition })),
+        texts: textsRef.current.map((t) => ({ id: t.id, text: t.text, start: t.start, dur: t.dur, x: t.x, y: t.y, size: t.size, color: t.color, font: t.font, style: t.style, anim: t.anim })),
         media,
         duration: totalRef.current,
         thumb: thumb && thumb.length < 100000 ? thumb : null,
@@ -296,7 +305,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     const t = setTimeout(saveProject, 2000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clips, name, ratio, library.length]);
+  }, [clips, texts, name, ratio, library.length]);
 
   // Projeto reaberto: refaz as miniaturas
   useEffect(() => {
@@ -340,6 +349,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         ratio: ratio.id,
         onProgress: setExportPct,
         signal: cancelRef.current,
+        texts: textsRef.current,
       });
       if (onExported) await onExported(blob);
       else {
@@ -617,11 +627,103 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     if (!selectedClip) return;
     commit(clips.map((c) => ({ ...c, filter: selectedClip.filter })));
   };
-  const startAmountDrag = () => { setPast((p) => [...p.slice(-49), clipsRef.current]); setFuture([]); };
+  const startAmountDrag = () => { setPast((p) => [...p.slice(-49), snap()]); setFuture([]); };
   const setAmount = (amount) => {
     if (!selectedClip?.filter) return;
     setClips(clipsRef.current.map((c) => (c.id === selectedClip.id ? { ...c, filter: { ...c.filter, amount } } : c)));
   };
+
+  // -------- textos --------
+  const selectedTextItem = texts.find((t) => t.id === selectedText) || null;
+  const pushHistory = () => { setPast((p) => [...p.slice(-49), snap()]); setFuture([]); };
+  const patchText = (id, patch, history = true) => {
+    if (history) pushHistory();
+    setTexts(textsRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  };
+  const addText = () => {
+    if (!total) return;
+    const start = Math.min(Math.max(0, timeRef.current), Math.max(0, total - 0.5));
+    const item = makeText(newId(), start);
+    item.dur = Math.max(0.5, Math.min(3, total - start));
+    pushHistory();
+    setTexts([...textsRef.current, item]);
+    setSelected(null);
+    setSelectedText(item.id);
+    setTool('texto');
+  };
+  const duplicateText = () => {
+    if (!selectedTextItem) return;
+    const item = { ...selectedTextItem, id: newId(), y: Math.min(0.95, selectedTextItem.y + 0.08) };
+    pushHistory();
+    setTexts([...textsRef.current, item]);
+    setSelectedText(item.id);
+  };
+  const removeText = (id) => {
+    pushHistory();
+    setTexts(textsRef.current.filter((t) => t.id !== id));
+    setSelectedText(null);
+  };
+  const pickText = (item) => {
+    setSelected(null);
+    setSelectedText(item.id);
+    const t = timeRef.current;
+    if (t < item.start || t >= item.start + item.dur) { setPlaying(false); seek(item.start + Math.min(0.5, item.dur / 2)); }
+  };
+  // Arrastar o texto na prévia
+  const textDrag = (e, item) => {
+    e.stopPropagation();
+    e.preventDefault();
+    pickText(item);
+    const rect = screenRef.current.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
+    let moved = false;
+    const move = (ev) => {
+      if (!moved) { pushHistory(); moved = true; }
+      const x = Math.min(1, Math.max(0, ox + (ev.clientX - sx) / rect.width));
+      const y = Math.min(1, Math.max(0, oy + (ev.clientY - sy) / rect.height));
+      setTexts(textsRef.current.map((t) => (t.id === item.id ? { ...t, x, y } : t)));
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  // Mover / esticar a barra do texto na linha do tempo
+  const textBarDrag = (e, item, mode) => {
+    e.stopPropagation();
+    e.preventDefault();
+    pickText(item);
+    const sx = e.clientX;
+    const o = { start: item.start, dur: item.dur };
+    const maxEnd = Math.max(totalRef.current, o.start + o.dur);
+    let moved = false;
+    const move = (ev) => {
+      if (!moved) { pushHistory(); moved = true; }
+      const dt = (ev.clientX - sx) / pps;
+      let patch;
+      if (mode === 'move') patch = { start: Math.min(Math.max(0, o.start + dt), Math.max(0, maxEnd - o.dur)) };
+      else if (mode === 'right') patch = { dur: Math.min(Math.max(0.3, o.dur + dt), maxEnd - o.start) };
+      else {
+        const ns = Math.min(Math.max(0, o.start + dt), o.start + o.dur - 0.3);
+        patch = { start: ns, dur: o.start + o.dur - ns };
+      }
+      setTexts(textsRef.current.map((t) => (t.id === item.id ? { ...t, ...patch } : t)));
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  // Faixas (linhas) do texto: textos que se sobrepõem no tempo ficam em linhas diferentes
+  const textLanes = useMemo(() => {
+    const ends = [];
+    const out = {};
+    [...texts].sort((a, b) => a.start - b.start).forEach((t) => {
+      let l = ends.findIndex((e) => e <= t.start + 0.001);
+      if (l === -1) { l = ends.length; ends.push(0); }
+      ends[l] = t.start + t.dur;
+      out[t.id] = l;
+    });
+    return { map: out, count: Math.max(1, ends.length) };
+  }, [texts]);
 
   // -------- edição --------
   const splitAtPlayhead = () => {
@@ -639,6 +741,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   };
 
   const deleteSelected = () => {
+    if (selectedText != null) { removeText(selectedText); return; }
     if (selected == null) return;
     commit(clips.filter((c) => c.id !== selected));
     setSelected(null);
@@ -661,7 +764,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     const base = clipsRef.current;
     const original = base.find((c) => c.id === clipId);
     const src = srcOf(original.srcId);
-    const before = base;
+    const before = { clips: base, texts: textsRef.current };
     let latest = base;
     const move = (ev) => {
       const dt = (ev.clientX - startX) / pps;
@@ -835,9 +938,31 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         <section style={s.center}>
           <PanelHead title="Programa" />
           <div style={s.stage}>
-            <div style={{ ...s.screen, ...previewBox }}>
+            <div ref={screenRef} style={{ ...s.screen, ...previewBox }} onPointerDown={() => setSelectedText(null)}>
               <video ref={videoRef} style={{ ...s.video, position: 'absolute', inset: 0 }} playsInline />
               <video ref={video2Ref} style={{ ...s.video, position: 'absolute', inset: 0, display: 'none' }} playsInline muted />
+              <div style={{ position: 'absolute', inset: 0, containerType: 'size', pointerEvents: 'none', overflow: 'hidden' }}>
+                {texts.map((item) => {
+                  const st = textState(time, item);
+                  if (!st) return null;
+                  const on = selectedText === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onPointerDown={(e) => textDrag(e, item)}
+                      style={{
+                        ...textCss(item, st),
+                        pointerEvents: 'auto',
+                        cursor: 'move',
+                        outline: on ? `1px dashed ${GREEN}` : 'none',
+                        outlineOffset: 4,
+                      }}
+                    >
+                      {item.text}
+                    </div>
+                  );
+                })}
+              </div>
               {clips.length === 0 && (
                 <div style={s.emptyScreen}>
                   <Film size={34} color="#333" />
@@ -945,7 +1070,62 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
               )}
             </div>
           )}
-          {tool && tool !== 'filtros' && tool !== 'transicoes' && (
+          {tool === 'texto' && (
+            <div style={s.toolInfo}>
+              <b>Texto</b>
+              <button type="button" style={{ ...s.applyAll, marginTop: 10 }} onClick={addText} disabled={!total}>+ Adicionar texto na agulha</button>
+              {!total && <p style={{ ...s.hint, marginTop: 6 }}>Coloque um vídeo na linha do tempo primeiro.</p>}
+              {total > 0 && !selectedTextItem && <p style={{ ...s.hint, marginTop: 8 }}>Clique em um texto na prévia ou na linha do tempo para editar.</p>}
+              {selectedTextItem && (
+                <>
+                  <textarea
+                    value={selectedTextItem.text}
+                    rows={2}
+                    style={s.textArea}
+                    onFocus={pushHistory}
+                    onChange={(e) => patchText(selectedTextItem.id, { text: e.target.value }, false)}
+                  />
+                  <p style={s.subLabel}>Fonte</p>
+                  <div style={s.chipRow}>
+                    {TEXT_FONTS.map((f) => (
+                      <button key={f.id} type="button" style={{ ...s.chip(selectedTextItem.font === f.id), fontFamily: f.family }} onClick={() => patchText(selectedTextItem.id, { font: f.id })}>{f.name}</button>
+                    ))}
+                  </div>
+                  <p style={s.subLabel}>Estilo</p>
+                  <div style={s.chipRow}>
+                    {TEXT_STYLES.map((f) => (
+                      <button key={f.id} type="button" style={s.chip(selectedTextItem.style === f.id)} onClick={() => patchText(selectedTextItem.id, { style: f.id })}>{f.name}</button>
+                    ))}
+                  </div>
+                  <p style={s.subLabel}>Animação</p>
+                  <div style={s.chipRow}>
+                    {TEXT_ANIMS.map((f) => (
+                      <button key={f.id} type="button" style={s.chip(selectedTextItem.anim === f.id)} onClick={() => patchText(selectedTextItem.id, { anim: f.id })}>{f.name}</button>
+                    ))}
+                  </div>
+                  <p style={s.subLabel}>Cor</p>
+                  <div style={s.chipRow}>
+                    {TEXT_COLORS.map((c) => (
+                      <button key={c} type="button" aria-label={c} onClick={() => patchText(selectedTextItem.id, { color: c })}
+                        style={{ width: 24, height: 24, borderRadius: '50%', backgroundColor: c, cursor: 'pointer', padding: 0, border: selectedTextItem.color === c ? `2px solid ${GREEN}` : '2px solid #3a3a3d' }} />
+                    ))}
+                  </div>
+                  <label style={s.amountRow}>
+                    <span style={s.hint}>Tamanho</span>
+                    <input
+                      type="range" min="0.03" max="0.2" step="0.005" style={{ flex: 1, minWidth: 0, width: '100%', accentColor: GREEN }}
+                      value={selectedTextItem.size}
+                      onPointerDown={startAmountDrag}
+                      onChange={(e) => patchText(selectedTextItem.id, { size: Number(e.target.value) }, false)}
+                    />
+                  </label>
+                  <button type="button" style={{ ...s.applyAll, marginTop: 10 }} onClick={duplicateText}>Duplicar</button>
+                  <button type="button" style={{ ...s.applyAll, marginTop: 8 }} onClick={() => removeText(selectedTextItem.id)}>Apagar texto</button>
+                </>
+              )}
+            </div>
+          )}
+          {tool && tool !== 'filtros' && tool !== 'transicoes' && tool !== 'texto' && (
             <div style={s.toolInfo}>
               <b>{TOOLS.find((t) => t.id === tool).label}</b>
               <p style={s.hint}>Entra nas próximas etapas do editor.</p>
@@ -970,7 +1150,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
             <button type="button" style={s.tlBtn} onClick={redo} disabled={!future.length} title="Refazer"><Redo2 size={16} /></button>
             <span style={s.sep} />
             <button type="button" style={s.tlBtnText} onClick={splitAtPlayhead} disabled={!clips.length}><Scissors size={15} /> Dividir</button>
-            <button type="button" style={s.tlBtnText} onClick={deleteSelected} disabled={selected == null}><Trash2 size={15} /> Apagar</button>
+            <button type="button" style={s.tlBtnText} onClick={deleteSelected} disabled={selected == null && selectedText == null}><Trash2 size={15} /> Apagar</button>
             <button type="button" style={s.tlBtn} onClick={() => moveSelected(-1)} disabled={selected == null} title="Mover para trás"><ChevronLeft size={16} /></button>
             <button type="button" style={s.tlBtn} onClick={() => moveSelected(1)} disabled={selected == null} title="Mover para frente"><ChevronRight size={16} /></button>
           </div>
@@ -993,14 +1173,14 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
             </div>
 
             {/* Faixa de vídeo */}
-            <div style={s.videoTrack} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); scrubFrom(e); } }}>
+            <div style={s.videoTrack} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); setSelectedText(null); scrubFrom(e); } }}>
               {layout.map((c) => {
                 const src = srcOf(c.srcId);
                 return (
                   <div
                     key={c.id}
                     style={{ ...s.clip, left: c.start * pps, width: c.len * pps, ...(selected === c.id ? s.clipSelected : {}) }}
-                    onPointerDown={(e) => { e.stopPropagation(); setSelected(c.id); }}
+                    onPointerDown={(e) => { e.stopPropagation(); setSelected(c.id); setSelectedText(null); }}
                     onDoubleClick={() => { setPlaying(false); seek(c.start); }}
                   >
                     <div style={s.thumbsLayer}>
@@ -1031,6 +1211,32 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
                 );
               })}
               {clips.length === 0 && <p style={{ ...s.hint, padding: '26px 16px' }}>Os clipes que você importar aparecem aqui. Arraste as alças verdes para cortar.</p>}
+            </div>
+
+            {/* Faixa de textos */}
+            <div
+              style={{ position: 'relative', height: textLanes.count * 28, margin: '8px 0 0 0' }}
+              onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelectedText(null); scrubFrom(e); } }}
+            >
+              {texts.map((item) => (
+                <div
+                  key={item.id}
+                  title="Arraste para mover. Puxe as pontas para ajustar a duração."
+                  onPointerDown={(e) => textBarDrag(e, item, 'move')}
+                  style={{
+                    position: 'absolute', top: textLanes.map[item.id] * 28, height: 24, left: item.start * pps, width: Math.max(item.dur * pps, 14),
+                    boxSizing: 'border-box', borderRadius: 4, cursor: 'grab', overflow: 'hidden', display: 'flex', alignItems: 'center',
+                    padding: '0 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                    background: selectedText === item.id ? 'rgba(82,250,53,0.28)' : 'rgba(82,250,53,0.12)',
+                    border: `1px solid ${selectedText === item.id ? GREEN : 'rgba(82,250,53,0.45)'}`, color: GREEN,
+                  }}
+                >
+                  <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} onPointerDown={(e) => textBarDrag(e, item, 'left')} />
+                  <Type size={11} style={{ marginRight: 5, flexShrink: 0 }} />
+                  {item.text}
+                  <span style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} onPointerDown={(e) => textBarDrag(e, item, 'right')} />
+                </div>
+              ))}
             </div>
 
             {dropAt !== null && <div style={{ ...s.dropLine, left: dropAt * pps }} />}
@@ -1201,6 +1407,16 @@ const s = {
   }),
   filterThumb: { width: '100%', aspectRatio: '1 / 1', borderRadius: 6, backgroundColor: '#222', backgroundSize: 'cover', backgroundPosition: 'center' },
   filterName: { fontSize: 10, color: '#ccc', fontWeight: 600 },
+  textArea: {
+    width: '100%', boxSizing: 'border-box', marginTop: 10, padding: 8, borderRadius: 6, border: '1px solid #3a3a3d',
+    backgroundColor: '#161618', color: '#fff', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none',
+  },
+  subLabel: { color: '#888', fontSize: 11, margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: 0.4 },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  chip: (a) => ({
+    padding: '5px 9px', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: a ? GREEN : '#ddd',
+    border: `1px solid ${a ? GREEN : '#3a3a3d'}`, backgroundColor: a ? 'rgba(82,250,53,0.1)' : 'transparent',
+  }),
   amountRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 },
   applyAll: {
     marginTop: 12, width: '100%', padding: '8px 0', borderRadius: 8, border: '1px solid #2a2b35', backgroundColor: '#15161c',
@@ -1213,7 +1429,7 @@ const s = {
     backgroundColor: '#1a1b22', border: '1px solid #2a2b35', borderRadius: 5, padding: '1px 6px', fontSize: 10.5,
     color: '#ddd', marginRight: 6, fontFamily: 'inherit',
   },
-  timeline: { height: 262, flexShrink: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#1b1b1d', borderRadius: 3, margin: 4 },
+  timeline: { height: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#1b1b1d', borderRadius: 3, margin: 4 },
   tlBar: { height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px' },
   tlTools: { display: 'flex', alignItems: 'center', gap: 6 },
   tlBtn: {
@@ -1226,8 +1442,8 @@ const s = {
   },
   sep: { width: 1, height: 20, backgroundColor: '#23242c', margin: '0 4px' },
   zoom: { display: 'flex', alignItems: 'center', gap: 8 },
-  trackScroll: { flex: 1, overflowX: 'auto', overflowY: 'hidden', position: 'relative' },
-  trackInner: { position: 'relative', height: '100%' },
+  trackScroll: { flex: 1, overflowX: 'auto', overflowY: 'auto', position: 'relative' },
+  trackInner: { position: 'relative', minHeight: '100%', paddingBottom: 10 },
   ruler: { position: 'relative', height: 26, borderBottom: '1px solid #2a2a2d', cursor: 'col-resize' },
   tick: { position: 'absolute', bottom: 0, width: 1, backgroundColor: '#2c2d37' },
   tickLabel: { position: 'absolute', top: -14, left: 4, fontSize: 9.5, color: '#6d6e79', whiteSpace: 'nowrap' },

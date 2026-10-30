@@ -8,6 +8,7 @@ import {
   getFirstEncodableAudioCodec, getFirstEncodableVideoCodec,
 } from 'mediabunny';
 import { drawTransition, transitionAt } from './editorTransitions';
+import { drawText, textState } from './editorText';
 
 export const OUTPUT_SIZES = {
   '9:16': { width: 720, height: 1280 },
@@ -36,7 +37,7 @@ function sliceBuffer(buffer, from, to) {
  * @returns {Promise<Blob>} MP4
  */
 export async function exportTimeline(clips, opts = {}) {
-  const { ratio = '9:16', onProgress = () => {}, signal = { cancelled: false } } = opts;
+  const { ratio = '9:16', onProgress = () => {}, signal = { cancelled: false }, texts = [] } = opts;
   if (!clips.length) throw new Error('Nenhum clipe para exportar.');
   const { width, height } = OUTPUT_SIZES[ratio] || OUTPUT_SIZES['9:16'];
   const total = clips.reduce((acc, c) => acc + (c.out - c.in), 0);
@@ -160,6 +161,11 @@ export async function exportTimeline(clips, opts = {}) {
         ctx.filter = clip.filter || 'none';
         ctx.drawImage(frame.canvas, 0, 0, width, height);
         ctx.filter = 'none';
+      }
+      // Textos sobre o vídeo
+      for (const item of texts) {
+        const st = textState(T, item);
+        if (st) drawText(ctx, item, st, width, height);
       }
       const duration = Math.max(0.001, Math.min(frame.duration || 1 / 30, len - local));
       await videoSource.add(offset + local, duration);
