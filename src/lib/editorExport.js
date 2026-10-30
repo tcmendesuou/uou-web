@@ -7,6 +7,7 @@ import {
   Input, Mp4OutputFormat, Output, QUALITY_HIGH, UrlSource,
   getFirstEncodableAudioCodec, getFirstEncodableVideoCodec,
 } from 'mediabunny';
+import { drawTransition, transitionAt } from './editorTransitions';
 
 export const OUTPUT_SIZES = {
   '9:16': { width: 720, height: 1280 },
@@ -30,7 +31,7 @@ function sliceBuffer(buffer, from, to) {
 }
 
 /**
- * @param {Array<{ file?: File, url?: string, in: number, out: number, filter?: string }>} clips  clipes na ordem final
+ * @param {Array<{ file?: File, url?: string, in: number, out: number, filter?: string, transition?: { type: string, duration: number } }>} clips  clipes na ordem final
  * @param {{ ratio?: string, onProgress?: (p:number)=>void, signal?: { cancelled: boolean } }} opts
  * @returns {Promise<Blob>} MP4
  */
@@ -106,24 +107,60 @@ export async function exportTimeline(clips, opts = {}) {
 
   await output.start();
 
-  // Vídeo: cada quadro de cada clipe é desenhado na tela de saída
+  // Vídeo: cada quadro de cada clipe é desenhado na tela de saída.
+  // Nas emendas com transição, o quadro do outro clipe é buscado (com sobra do arquivo
+  // quando existe; senão congela o primeiro/último quadro) e os dois são misturados.
+  const layout = [];
+  { let at = 0; clips.forEach((c) => { layout.push({ start: at, len: c.out - c.in, transition: c.transition }); at += c.out - c.in; }); }
+  const sinks = new Map();
+  const durations = new Map();
+  const sinkFor = async (idx) => {
+    if (!sinks.has(idx)) {
+      const track = await openInput(clips[idx]).getPrimaryVideoTrack();
+      if (!track) throw new Error('Um dos arquivos não tem vídeo.');
+      if (!(await track.canDecode())) throw new Error('Este navegador não consegue ler esse formato de vídeo.');
+      sinks.set(idx, new CanvasSink(track, { width, height, fit: 'contain' }));
+      durations.set(idx, await openInput(clips[idx]).computeDuration());
+    }
+    return sinks.get(idx);
+  };
+
   offset = 0;
-  for (const clip of clips) {
-    const input = openInput(clip);
-    const videoTrack = await input.getPrimaryVideoTrack();
-    if (!videoTrack) throw new Error('Um dos arquivos não tem vídeo.');
-    if (!(await videoTrack.canDecode())) throw new Error('Este navegador não consegue ler esse formato de vídeo.');
-    const sink = new CanvasSink(videoTrack, { width, height, fit: 'contain' });
+  for (let idx = 0; idx < clips.length; idx++) {
+    const clip = clips[idx];
+    const sink = await sinkFor(idx);
     const len = clip.out - clip.in;
     for await (const frame of sink.canvases(clip.in, clip.out)) {
       if (signal.cancelled) throw new Error('cancelado');
       const local = Math.max(0, frame.timestamp - clip.in);
-      ctx.filter = 'none';
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-      ctx.filter = clip.filter || 'none';
-      ctx.drawImage(frame.canvas, 0, 0, width, height);
-      ctx.filter = 'none';
+      const T = offset + local;
+      const z = transitionAt(layout, T);
+      let drawn = false;
+      if (z && (idx === z.outIdx || idx === z.inIdx)) {
+        const otherIdx = idx === z.outIdx ? z.inIdx : z.outIdx;
+        const other = clips[otherIdx];
+        // Instante do outro arquivo: continua de onde o corte acontece (usa a sobra se houver)
+        const raw = idx === z.outIdx ? other.in + (T - z.cut) : other.out + (T - z.cut);
+        const otherSink = await sinkFor(otherIdx);
+        const lastT = Math.max(0, (durations.get(otherIdx) || 0) - 0.05);
+        const wrapped = await otherSink.getCanvas(Math.max(0, Math.min(lastT, raw)));
+        if (wrapped) {
+          const outCanvas = idx === z.outIdx ? frame.canvas : wrapped.canvas;
+          const inCanvas = idx === z.outIdx ? wrapped.canvas : frame.canvas;
+          const outFilter = clips[z.outIdx].filter || 'none';
+          const inFilter = clips[z.inIdx].filter || 'none';
+          drawTransition(ctx, z.type, z.p, outCanvas, inCanvas, width, height, outFilter, inFilter);
+          drawn = true;
+        }
+      }
+      if (!drawn) {
+        ctx.filter = 'none';
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        ctx.filter = clip.filter || 'none';
+        ctx.drawImage(frame.canvas, 0, 0, width, height);
+        ctx.filter = 'none';
+      }
       const duration = Math.max(0.001, Math.min(frame.duration || 1 / 30, len - local));
       await videoSource.add(offset + local, duration);
       onProgress(Math.min(0.97, (offset + local) / total));

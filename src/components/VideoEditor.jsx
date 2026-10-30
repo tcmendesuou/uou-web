@@ -8,6 +8,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { db, auth, storage } from '../firebase';
 import { exportTimeline } from '../lib/editorExport';
 import { FILTERS, filterCss } from '../lib/editorFilters';
+import { TRANSITIONS, DEFAULT_TRANSITION_SECONDS, transitionAt, effectParams, cssFor } from '../lib/editorTransitions';
 import {
   X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
   Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight, Video, CheckCircle2, MonitorUp,
@@ -89,6 +90,7 @@ const libraryFromProject = (project) => {
 export default function VideoEditor({ initialClips = [], project = null, onClose, onExported }) {
   const fileRef = useRef(null);
   const videoRef = useRef(null);
+  const video2Ref = useRef(null); // segundo vídeo: só aparece durante as transições
   const trackRef = useRef(null);
 
   const [library, setLibrary] = useState(() => libraryFromProject(project)); // [{id,name,url,duration,thumbs,step}]
@@ -259,7 +261,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         userId: uid,
         name: nameRef.current.trim() || 'Projeto sem título',
         ratio: ratioRef.current.id,
-        clips: clipsRef.current.map((c) => ({ id: c.id, srcId: c.srcId, in: c.in, out: c.out, filter: c.filter })),
+        clips: clipsRef.current.map((c) => ({ id: c.id, srcId: c.srcId, in: c.in, out: c.out, filter: c.filter, transition: c.transition })),
         media,
         duration: totalRef.current,
         thumb: thumb && thumb.length < 100000 ? thumb : null,
@@ -332,7 +334,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     try {
       const payload = layout.map((c) => {
         const src = srcOf(c.srcId);
-        return { file: src.file || undefined, url: src.url, in: c.in, out: c.out, filter: filterCss(c.filter) };
+        return { file: src.file || undefined, url: src.url, in: c.in, out: c.out, filter: filterCss(c.filter), transition: c.transition };
       });
       const blob = await exportTimeline(payload, {
         ratio: ratio.id,
@@ -417,12 +419,24 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const activeIdxRef = useRef(-1);
 
   const loadClipAt = useCallback((idx, localTime, thenPlay) => {
-    const video = videoRef.current;
+    let video = videoRef.current;
     const clip = layoutRef.current[idx];
     if (!video || !clip) return;
     const src = srcOf(clip.srcId);
     if (!src) return;
     activeIdxRef.current = idx;
+    // O segundo vídeo já está com este clipe carregado (transição)? Troca os papéis, sem piscar.
+    const v2 = video2Ref.current;
+    if (v2 && thenPlay && v2.dataset.srcId === String(clip.srcId) && v2.readyState >= 2 && Math.abs(v2.currentTime - localTime) < 0.5) {
+      video2Ref.current = video;
+      videoRef.current = v2;
+      video.muted = true;
+      v2.muted = false;
+      v2.currentTime = localTime;
+      v2.play().catch(() => {});
+      video = v2;
+      return;
+    }
     const apply = () => {
       video.currentTime = localTime;
       if (thenPlay) video.play().catch(() => {});
@@ -519,6 +533,75 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     ));
   };
 
+  // -------- transições (prévia) --------
+  const syncTransition = useCallback((t) => {
+    const v1 = videoRef.current;
+    const v2 = video2Ref.current;
+    if (!v1 || !v2) return;
+    const lay = layoutRef.current;
+    const z = transitionAt(lay, t);
+    if (!z) {
+      if (v2.style.display !== 'none') { v2.pause(); v2.style.display = 'none'; }
+      v1.style.opacity = ''; v1.style.transform = ''; v1.style.clipPath = ''; v1.style.zIndex = '';
+      return;
+    }
+    const outC = lay[z.outIdx];
+    const inC = lay[z.inIdx];
+    const primaryIsOut = t < inC.start;
+    const other = primaryIsOut ? inC : outC;
+    const src = srcOf(other.srcId);
+    if (!src) return;
+    const raw = primaryIsOut ? other.in + (t - inC.start) : other.out + (t - inC.start);
+    const dur = src.duration || 0;
+    const target = Math.max(0, Math.min(Math.max(0, dur - 0.05), raw));
+    const inRange = raw >= 0 && raw < dur - 0.05;
+    if (v2.dataset.srcId !== String(other.srcId)) {
+      v2.dataset.srcId = String(other.srcId);
+      v2.src = src.url;
+      v2.addEventListener('loadedmetadata', () => {
+        v2.currentTime = target;
+        if (playingRef.current && inRange) v2.play().catch(() => {});
+      }, { once: true });
+    } else if (playingRef.current && inRange) {
+      if (Math.abs(v2.currentTime - target) > 0.25) v2.currentTime = target;
+      if (v2.paused) v2.play().catch(() => {});
+    } else {
+      if (!v2.paused) v2.pause();
+      if (Math.abs(v2.currentTime - target) > 0.03) v2.currentTime = target;
+    }
+    const prm = effectParams(z.type, z.p);
+    const outEl = primaryIsOut ? v1 : v2;
+    const inEl = primaryIsOut ? v2 : v1;
+    Object.assign(outEl.style, cssFor(prm.out), { zIndex: '1' });
+    Object.assign(inEl.style, cssFor(prm.inn), { zIndex: '2' });
+    v2.style.display = 'block';
+    v2.style.filter = filterCss(other.filter);
+  }, []);
+  useEffect(() => { syncTransition(time); }, [time, clips, playing, syncTransition]);
+
+  const selectedIdx = clips.findIndex((c) => c.id === selected);
+  const applyTransition = (type) => {
+    if (selectedIdx < 1) return;
+    const tr = type === 'none' ? undefined : { type, duration: clips[selectedIdx].transition?.duration || DEFAULT_TRANSITION_SECONDS };
+    commit(clips.map((c, i) => (i === selectedIdx ? { ...c, transition: tr } : c)));
+  };
+  const applyTransitionToAll = () => {
+    if (selectedIdx < 1 || !clips[selectedIdx].transition) return;
+    const tr = clips[selectedIdx].transition;
+    commit(clips.map((c, i) => (i >= 1 ? { ...c, transition: tr } : c)));
+  };
+  const setTransitionSeconds = (d) => {
+    if (selectedIdx < 1 || !clips[selectedIdx].transition) return;
+    setClips(clipsRef.current.map((c, i) => (i === selectedIdx ? { ...c, transition: { ...c.transition, duration: d } } : c)));
+  };
+  const previewTransition = () => {
+    if (selectedIdx < 1 || !clips[selectedIdx].transition) return;
+    const c = layout[selectedIdx];
+    setPlaying(false);
+    seek(Math.max(0, c.start - 1.2), true);
+    setPlaying(true);
+  };
+
   // -------- filtros --------
   const selectedClip = clips.find((c) => c.id === selected) || null;
   const activeClip = layout.find((c) => time >= c.start && time < c.start + c.len) || layout[layout.length - 1] || null;
@@ -547,7 +630,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     if (idx === -1) return;
     const c = layout[idx];
     const cut = c.in + (t - c.start);
-    const a = { id: newId(), srcId: c.srcId, in: c.in, out: cut, filter: c.filter };
+    const a = { id: newId(), srcId: c.srcId, in: c.in, out: cut, filter: c.filter, transition: c.transition };
     const b = { id: newId(), srcId: c.srcId, in: cut, out: c.out, filter: c.filter };
     const next = clips.slice();
     next.splice(idx, 1, a, b);
@@ -753,7 +836,8 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
           <PanelHead title="Programa" />
           <div style={s.stage}>
             <div style={{ ...s.screen, ...previewBox }}>
-              <video ref={videoRef} style={s.video} playsInline />
+              <video ref={videoRef} style={{ ...s.video, position: 'absolute', inset: 0 }} playsInline />
+              <video ref={video2Ref} style={{ ...s.video, position: 'absolute', inset: 0, display: 'none' }} playsInline muted />
               {clips.length === 0 && (
                 <div style={s.emptyScreen}>
                   <Film size={34} color="#333" />
@@ -821,7 +905,47 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
               )}
             </div>
           )}
-          {tool && tool !== 'filtros' && (
+          {tool === 'transicoes' && (
+            <div style={s.toolInfo}>
+              <b>Transições</b>
+              {selectedIdx < 1 ? (
+                <p style={{ ...s.hint, marginTop: 6 }}>
+                  {clips.length < 2
+                    ? 'Coloque pelo menos dois clipes na linha do tempo.'
+                    : 'Clique em um clipe que não seja o primeiro. A transição acontece na emenda com o clipe anterior.'}
+                </p>
+              ) : (
+                <>
+                  <div style={s.filterGrid}>
+                    {TRANSITIONS.map((tr) => {
+                      const on = (clips[selectedIdx].transition?.type || 'none') === tr.id;
+                      return (
+                        <button key={tr.id} type="button" style={s.transBtn(on)} onClick={() => applyTransition(tr.id)}>
+                          {tr.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {clips[selectedIdx].transition && (
+                    <>
+                      <label style={s.amountRow}>
+                        <span style={s.hint}>{(clips[selectedIdx].transition.duration || 0).toFixed(1).replace('.', ',')} s</span>
+                        <input
+                          type="range" min="0.2" max="2" step="0.1" style={{ flex: 1, minWidth: 0, width: '100%', accentColor: GREEN }}
+                          value={clips[selectedIdx].transition.duration || DEFAULT_TRANSITION_SECONDS}
+                          onPointerDown={startAmountDrag}
+                          onChange={(e) => setTransitionSeconds(Number(e.target.value))}
+                        />
+                      </label>
+                      <button type="button" style={s.applyAll} onClick={previewTransition}>Ver a transição</button>
+                      <button type="button" style={{ ...s.applyAll, marginTop: 8 }} onClick={applyTransitionToAll}>Aplicar em todas as emendas</button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {tool && tool !== 'filtros' && tool !== 'transicoes' && (
             <div style={s.toolInfo}>
               <b>{TOOLS.find((t) => t.id === tool).label}</b>
               <p style={s.hint}>Entra nas próximas etapas do editor.</p>
@@ -893,6 +1017,9 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
                         />
                       ))}
                     </div>
+                    {c.transition && c.transition.type !== 'none' && (
+                      <span style={s.transBadge} title="Transição na emenda com o clipe anterior"><Blend size={11} color={GREEN} /></span>
+                    )}
                     <span style={s.clipLabel}>{src?.name}</span>
                     {selected === c.id && (
                       <>
@@ -1058,6 +1185,15 @@ const s = {
     cursor: 'pointer', fontFamily: 'inherit',
   }),
   toolLabel: { fontSize: 11, color: '#ccc', fontWeight: 600 },
+  transBtn: (a) => ({
+    padding: '10px 4px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+    border: a ? `1px solid ${GREEN}` : '1px solid #2a2a2d', backgroundColor: a ? 'rgba(82,250,53,0.08)' : 'transparent',
+    color: a ? GREEN : '#ccc',
+  }),
+  transBadge: {
+    position: 'absolute', left: 4, top: 4, zIndex: 3, width: 18, height: 18, borderRadius: 5, backgroundColor: 'rgba(0,0,0,0.75)',
+    border: `1px solid ${GREEN}`, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+  },
   filterGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 10 },
   filterBtn: (a) => ({
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 4, borderRadius: 8, cursor: 'pointer',
