@@ -20,6 +20,8 @@ const TABS = [
   { id: 'computador', label: 'Do Computador', icon: MonitorUp },
 ];
 
+const videoName = (v) => (v.originalName || v.name || v.title || 'Vídeo sem nome').replace(/\.[^.]+$/, '');
+
 export default function Criar() {
   const navigate = useNavigate();
   const uid = auth.currentUser?.uid;
@@ -161,7 +163,7 @@ export default function Criar() {
         status: 'ready',
         storagePath: storageRef.fullPath,
         url,
-        originalName: fileName,
+        originalName: editorProject?.name || `Vídeo editado ${new Date().toLocaleDateString('pt-BR')}`,
         createdAt: new Date().toISOString(),
       });
 
@@ -227,6 +229,7 @@ export default function Criar() {
                   {prontos.map((video) => (
                     <div key={video.id} style={styles.card}>
                       <video src={video.url} style={styles.cardVideo} controls />
+                      <p style={styles.cardName} title={videoName(video)}>{videoName(video)}</p>
                       <div style={styles.cardActions}>
                         <button style={styles.primaryBtn} onClick={() => handlePostarVideo(video)}>
                           <Send size={14} /> Postar
@@ -263,6 +266,7 @@ export default function Criar() {
                   {brutos.map((video) => (
                     <div key={video.id} style={styles.card}>
                       <video src={video.url} style={styles.cardVideo} muted />
+                      <p style={styles.cardName} title={videoName(video)}>{videoName(video)}</p>
                       <div style={styles.cardActions}>
                         <button style={styles.primaryBtn} onClick={() => handleEditRaw(video)}>
                           <Scissors size={14} /> Editar
@@ -379,6 +383,7 @@ const styles = {
     backgroundColor: '#000',
     display: 'block',
   },
+  cardName: { color: '#f0f0f0', fontSize: 12, fontWeight: 600, margin: 0, padding: '8px 10px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   cardActions: {
     display: 'flex',
     alignItems: 'center',
