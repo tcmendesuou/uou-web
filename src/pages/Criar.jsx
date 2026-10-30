@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, auth } from '../firebase';
-import { CheckCircle2, Video, MonitorUp, Trash2, Send, Scissors, Upload } from 'lucide-react';
+import { CheckCircle2, Video, MonitorUp, Trash2, Send, Scissors, Upload, Film } from 'lucide-react';
 import VideoEditor from '../components/VideoEditor';
 
 const TABS = [
@@ -21,6 +21,8 @@ export default function Criar() {
   const [videos, setVideos] = useState([]);
   const [uploadingRaw, setUploadingRaw] = useState(false);
   const [editorClips, setEditorClips] = useState(null); // null = editor fechado
+  const [editorProject, setEditorProject] = useState(null); // projeto salvo aberto no editor
+  const [projects, setProjects] = useState([]);
 
   // ✅ Biblioteca pessoal de vídeos do criador (creator_videos) — separada
   // da coleção `posts`, que só recebe o vídeo quando ele efetivamente posta.
@@ -35,6 +37,44 @@ export default function Criar() {
     });
     return () => unsubscribe();
   }, [uid]);
+
+  // ✅ Projetos de edição em andamento (rascunhos salvos pelo editor)
+  useEffect(() => {
+    if (!uid) return undefined;
+    const q = query(collection(db, 'editor_projects'), where('userId', '==', uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const items = [];
+        snapshot.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() }));
+        items.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        setProjects(items);
+      },
+      (err) => console.error('[Criar] Erro ao carregar projetos:', err)
+    );
+    return () => unsubscribe();
+  }, [uid]);
+
+  const handleDeleteProject = async (project) => {
+    if (!window.confirm(`Excluir o projeto "${project.name || 'Projeto sem título'}"? Essa ação não pode ser desfeita.`)) return;
+    try {
+      await deleteDoc(doc(db, 'editor_projects', project.id));
+      // apaga também os vídeos do computador que subiram junto com o projeto
+      for (const m of project.media || []) {
+        if (m.storagePath) {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await deleteObject(ref(storage, m.storagePath));
+          } catch (e) {
+            // ignora se já não existir
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Criar] Erro ao excluir projeto:', err);
+      alert('Não foi possível excluir o projeto.');
+    }
+  };
 
   const prontos = videos.filter((v) => v.status === 'ready');
   const brutos = videos.filter((v) => v.status === 'raw');
@@ -120,6 +160,7 @@ export default function Criar() {
       });
 
       setEditorClips(null);
+      setEditorProject(null);
       setActiveTab('prontos');
     } catch (err) {
       console.error('[Criar] Erro ao salvar vídeo exportado:', err);
@@ -152,6 +193,32 @@ export default function Criar() {
             {tab.label}
           </button>
         ))}
+      </div>
+
+      <div style={styles.projectsBox}>
+        <p style={styles.projectsTitle}><Film size={15} color="#52fa35" /> Projetos em andamento</p>
+        {projects.length === 0 ? (
+          <p style={{ ...styles.emptyText, margin: 0 }}>Seus projetos de edição aparecem aqui para você continuar depois.</p>
+        ) : (
+          <div style={styles.projectsRow}>
+            {projects.map((p) => (
+              <div key={p.id} style={styles.projectCard}>
+                <button style={styles.projectOpen} onClick={() => { setEditorClips(null); setEditorProject(p); }}>
+                  <div style={{ ...styles.projectThumb, backgroundImage: p.thumb ? `url(${p.thumb})` : 'none' }}>
+                    {!p.thumb && <Film size={22} color="#333" />}
+                  </div>
+                  <span style={styles.projectName}>{p.name || 'Projeto sem título'}</span>
+                  <span style={styles.projectMeta}>
+                    {Math.round(p.duration || 0)}s · {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('pt-BR') : ''}
+                  </span>
+                </button>
+                <button style={styles.projectDelete} onClick={() => handleDeleteProject(p)} aria-label="Excluir projeto">
+                  <Trash2 size={14} color="#ff4444" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {activeTab === 'prontos' && (
@@ -235,10 +302,12 @@ export default function Criar() {
         </div>
       )}
 
-      {editorClips && (
+      {(editorClips || editorProject) && (
         <VideoEditor
-          initialClips={editorClips}
-          onClose={() => setEditorClips(null)}
+          key={editorProject?.id || 'novo'}
+          initialClips={editorClips || []}
+          project={editorProject}
+          onClose={() => { setEditorClips(null); setEditorProject(null); }}
           onExported={handleExported}
         />
       )}
@@ -300,6 +369,63 @@ const styles = {
   tabButtonActive: {
     backgroundColor: 'rgba(82,250,53,0.12)',
     color: '#52fa35',
+  },
+  projectsBox: {
+    marginBottom: 24,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#0d0e13',
+    border: '1px solid #1a1b22',
+  },
+  projectsTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    margin: '0 0 12px 0',
+    color: '#f0f0f0',
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  projectsRow: { display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 },
+  projectCard: { position: 'relative', flexShrink: 0, width: 130 },
+  projectOpen: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    width: '100%',
+    padding: 0,
+    border: 'none',
+    background: 'none',
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontFamily: 'inherit',
+  },
+  projectThumb: {
+    width: '100%',
+    aspectRatio: '1 / 1',
+    borderRadius: 10,
+    backgroundColor: '#15161c',
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  projectName: { color: '#f0f0f0', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  projectMeta: { color: '#777', fontSize: 11 },
+  projectDelete: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: '50%',
+    border: 'none',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
   },
   emptyText: {
     color: '#666',

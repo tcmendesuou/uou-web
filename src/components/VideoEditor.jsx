@@ -3,8 +3,9 @@
 // reordena, toca a sequência e exporta um MP4 (no navegador, sem servidor).
 // Uso: <VideoEditor initialClips={[{ name, url, file? }]} onClose={...} onExported={(blob) => ...} />
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { collection, query, where, onSnapshot, addDoc, setDoc, doc } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, auth, storage } from '../firebase';
 import { exportTimeline } from '../lib/editorExport';
 import { FILTERS, filterCss } from '../lib/editorFilters';
 import {
@@ -64,20 +65,34 @@ async function makeThumbs(url, duration) {
   return { thumbs, step, ratio };
 }
 
-export default function VideoEditor({ initialClips = [], onClose, onExported }) {
+// Projeto salvo → entradas da biblioteca do editor (as miniaturas são refeitas ao abrir)
+const libraryFromProject = (project) => {
+  const media = project?.media || [];
+  (project?.clips || []).forEach((c) => { if (c.id >= idCounter) idCounter = c.id + 1; });
+  media.forEach((m) => { if (m.id >= idCounter) idCounter = m.id + 1; });
+  return media.map((m) => ({
+    id: m.id, name: m.name, url: m.url, file: null, duration: m.duration || 0, thumbs: [], step: m.duration || 1, storagePath: m.storagePath,
+  }));
+};
+
+export default function VideoEditor({ initialClips = [], project = null, onClose, onExported }) {
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const trackRef = useRef(null);
 
-  const [library, setLibrary] = useState([]); // [{id,name,url,duration,thumbs,step}]
-  const [clips, setClips] = useState([]); // [{id, srcId, in, out}]
+  const [library, setLibrary] = useState(() => libraryFromProject(project)); // [{id,name,url,duration,thumbs,step}]
+  const [clips, setClips] = useState(() => (project?.clips || []).map((c) => ({ ...c }))); // [{id, srcId, in, out}]
+  const [projectId, setProjectId] = useState(project?.id || null);
+  const [name, setName] = useState(project?.name || 'Projeto sem título');
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
+  const [closing, setClosing] = useState(false);
   const [past, setPast] = useState([]);
   const [future, setFuture] = useState([]);
   const [selected, setSelected] = useState(null);
   const [time, setTime] = useState(0); // posição na linha do tempo (s)
   const [playing, setPlaying] = useState(false);
   const [pps, setPps] = useState(70); // pixels por segundo (zoom)
-  const [ratio, setRatio] = useState(RATIOS[0]);
+  const [ratio, setRatio] = useState(() => RATIOS.find((r) => r.id === project?.ratio) || RATIOS[0]);
   const [tool, setTool] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [mediaTab, setMediaTab] = useState('brutos');
@@ -90,6 +105,11 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
   const cloudRef = useRef([]); cloudRef.current = cloud;
   const clipsRef = useRef(clips); clipsRef.current = clips;
   const timeRef = useRef(0);
+  const nameRef = useRef(name); nameRef.current = name;
+  const ratioRef = useRef(ratio); ratioRef.current = ratio;
+  const projectIdRef = useRef(project?.id || null);
+  const dirtyRef = useRef(false);
+  const saveChain = useRef(Promise.resolve(true));
   const playingRef = useRef(false);
 
   // Início de cada clipe na linha do tempo
@@ -190,13 +210,103 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    if (initialClips.length) importItems(initialClips);
+    if (!project && initialClips.length) importItems(initialClips);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // -------- salvar projeto (rascunho) --------
+  // Guarda a linha do tempo no Firestore. Vídeos do computador sobem junto (uma vez só),
+  // para o projeto poder ser reaberto depois em qualquer lugar.
+  const doSave = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return true;
+    if (!clipsRef.current.length && !projectIdRef.current) return true;
+    setSaveState('saving');
+    try {
+      const media = [];
+      for (const l of libRef.current) {
+        let url = l.remoteUrl || (l.file ? null : l.url);
+        let path = l.storagePath;
+        if (!url) {
+          const r = storageRef(storage, `creator_videos/${uid}/project/${Date.now()}_${l.name}`);
+          // eslint-disable-next-line no-await-in-loop
+          await uploadBytes(r, l.file);
+          // eslint-disable-next-line no-await-in-loop
+          url = await getDownloadURL(r);
+          path = r.fullPath;
+          libRef.current = libRef.current.map((x) => (x.id === l.id ? { ...x, remoteUrl: url, storagePath: path } : x));
+          setLibrary(libRef.current);
+        }
+        media.push({ id: l.id, name: l.name, url, duration: l.duration, storagePath: path });
+      }
+      const first = clipsRef.current[0];
+      const thumb = libRef.current.find((l) => l.id === first?.srcId)?.thumbs?.[0];
+      const data = JSON.parse(JSON.stringify({
+        userId: uid,
+        name: nameRef.current.trim() || 'Projeto sem título',
+        ratio: ratioRef.current.id,
+        clips: clipsRef.current.map((c) => ({ id: c.id, srcId: c.srcId, in: c.in, out: c.out, filter: c.filter })),
+        media,
+        duration: totalRef.current,
+        thumb: thumb && thumb.length < 100000 ? thumb : null,
+        updatedAt: new Date().toISOString(),
+      }));
+      if (projectIdRef.current) {
+        await setDoc(doc(db, 'editor_projects', projectIdRef.current), data, { merge: true });
+      } else {
+        const created = await addDoc(collection(db, 'editor_projects'), { ...data, createdAt: data.updatedAt });
+        projectIdRef.current = created.id;
+        setProjectId(created.id);
+      }
+      dirtyRef.current = false;
+      setSaveState('saved');
+      return true;
+    } catch (err) {
+      console.error('[Editor] erro ao salvar projeto:', err);
+      setSaveState('error');
+      return false;
+    }
+  };
+  const saveProject = () => {
+    saveChain.current = saveChain.current.then(doSave, doSave);
+    return saveChain.current;
+  };
+
+  // Salva sozinho 2 s depois de qualquer mudança
+  const firstRunRef = useRef(true);
+  useEffect(() => {
+    if (firstRunRef.current) { firstRunRef.current = false; return undefined; }
+    dirtyRef.current = true;
+    const t = setTimeout(saveProject, 2000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips, name, ratio, library.length]);
+
+  // Projeto reaberto: refaz as miniaturas
+  useEffect(() => {
+    libraryFromProject(project).forEach((l) => {
+      if (!l.duration) return;
+      makeThumbs(l.url, l.duration)
+        .then(({ thumbs, step }) => setLibrary((prev) => prev.map((x) => (x.id === l.id ? { ...x, thumbs, step } : x))))
+        .catch((err) => console.error('[Editor] miniaturas:', err));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleClose = async () => {
+    if (dirtyRef.current && auth.currentUser) {
+      setClosing(true);
+      const ok = await saveProject();
+      setClosing(false);
+      if (!ok && !window.confirm('Não foi possível salvar o projeto. Sair mesmo assim?')) return;
+    }
+    onClose?.();
+  };
 
   // -------- exportar --------
   const handleExport = async () => {
     if (!clips.length || exporting) return;
+    if (dirtyRef.current) saveProject();
     setPlaying(false);
     setExportError('');
     setExportPct(0);
@@ -492,10 +602,24 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
       {/* Barra superior */}
       <div style={s.topBar}>
         <div style={s.topLeft}>
-          <button type="button" style={s.iconBtn} onClick={onClose} aria-label="Fechar"><X size={18} /></button>
+          <button type="button" style={s.iconBtn} onClick={handleClose} aria-label="Fechar"><X size={18} /></button>
           <Film size={18} color={GREEN} />
-          <span style={s.projectName}>Projeto sem título</span>
+          <input
+            value={name}
+            maxLength={60}
+            onChange={(e) => setName(e.target.value)}
+            onFocus={(e) => { e.target.select(); e.target.style.borderColor = GREEN; }}
+            onBlur={(e) => { e.target.style.borderColor = 'transparent'; if (!name.trim()) setName('Projeto sem título'); }}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.target.blur(); }}
+            style={s.nameInput}
+            aria-label="Nome do projeto"
+          />
           <span style={s.betaTag}>beta</span>
+          {saveState !== 'idle' && (
+            <span style={{ ...s.saveText, color: saveState === 'error' ? '#ff6b6b' : '#666' }}>
+              {saveState === 'saving' ? 'Salvando...' : saveState === 'saved' ? 'Projeto salvo' : 'Erro ao salvar'}
+            </span>
+          )}
         </div>
         <div style={s.ratioGroup}>
           {RATIOS.map((r) => (
@@ -750,6 +874,13 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
         </div>
       </div>
 
+      {closing && (
+        <div style={s.overlay}>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Salvando seu projeto...</p>
+          <p style={s.hint}>Vídeos do computador estão sendo enviados. Não feche esta janela.</p>
+        </div>
+      )}
+
       {exporting && (
         <div style={s.overlay}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Exportando seu vídeo...</p>
@@ -784,7 +915,11 @@ const s = {
     width: 34, height: 34, borderRadius: '50%', border: '1px solid #23242c', backgroundColor: '#111218',
     color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
   },
-  projectName: { fontSize: 14, fontWeight: 600 },
+  nameInput: {
+    width: 210, fontSize: 14, fontWeight: 600, color: '#fff', backgroundColor: 'transparent', border: '1px solid transparent',
+    borderRadius: 6, padding: '4px 8px', outline: 'none', fontFamily: 'inherit',
+  },
+  saveText: { fontSize: 11, marginLeft: 4 },
   betaTag: {
     fontSize: 10, fontWeight: 700, color: GREEN, border: `1px solid ${GREEN}`, borderRadius: 999, padding: '2px 8px',
   },
