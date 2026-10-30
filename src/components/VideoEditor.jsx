@@ -3,10 +3,12 @@
 // reordena, toca a sequência e exporta um MP4 (no navegador, sem servidor).
 // Uso: <VideoEditor initialClips={[{ name, url, file? }]} onClose={...} onExported={(blob) => ...} />
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { exportTimeline } from '../lib/editorExport';
 import {
   X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
-  Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight,
+  Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight, Video, CheckCircle2, MonitorUp,
 } from 'lucide-react';
 
 const GREEN = '#52fa35';
@@ -77,6 +79,8 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
   const [ratio, setRatio] = useState(RATIOS[0]);
   const [tool, setTool] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const [mediaTab, setMediaTab] = useState('brutos');
+  const [cloud, setCloud] = useState([]); // vídeos da biblioteca do criador (Brutos e Prontos)
   const [exportPct, setExportPct] = useState(0);
   const [exportError, setExportError] = useState('');
   const cancelRef = useRef({ cancelled: false });
@@ -149,6 +153,25 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
         .catch((err) => console.error('[Editor] miniaturas:', err));
     }
   }
+
+  // Biblioteca do criador (mesma coleção da página Criar): Brutos e Prontos
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return undefined;
+    return onSnapshot(
+      query(collection(db, 'creator_videos'), where('userId', '==', uid)),
+      (snap) => {
+        const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        setCloud(items);
+      },
+      (err) => console.error('[Editor] erro ao carregar biblioteca:', err)
+    );
+  }, []);
+
+  const addCloud = (video) => {
+    importItems([{ name: video.originalName || 'Vídeo', url: video.url }]);
+  };
 
   // Clipes que já chegam abertos (vindos da página Criar)
   const startedRef = useRef(false);
@@ -410,23 +433,56 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
 
       {/* Área principal */}
       <div style={s.main}>
-        {/* Mídia */}
+        {/* Mídia: Brutos e Prontos (da nuvem) + vídeos do computador */}
         <aside style={s.panel}>
-          <p style={s.panelTitle}>Mídia</p>
-          <button type="button" style={s.importBtn} onClick={() => fileRef.current?.click()}>
-            <Plus size={18} /> Importar vídeos
-          </button>
-          <div style={s.libList}>
-            {library.length === 0 && <p style={s.hint}>Importe um ou mais vídeos para começar.</p>}
-            {library.map((l) => (
-              <button key={l.id} type="button" style={s.libItem} onClick={() => addToTimeline(l)} title="Adicionar à linha do tempo">
-                <div style={{ ...s.libThumb, backgroundImage: l.thumbs[0] ? `url(${l.thumbs[0]})` : 'none' }}>
-                  <span style={s.libDur}>{fmt(l.duration).slice(0, -2)}</span>
-                </div>
-                <span style={s.libName}>{l.name}</span>
+          <div style={s.mediaTabs}>
+            {[
+              { id: 'brutos', label: 'Brutos', icon: Video },
+              { id: 'prontos', label: 'Prontos', icon: CheckCircle2 },
+              { id: 'computador', label: 'Computador', icon: MonitorUp },
+            ].map(({ id, label, icon: Icon }) => (
+              <button key={id} type="button" style={s.mediaTab(mediaTab === id)} onClick={() => setMediaTab(id)}>
+                <Icon size={12} /> {label}
               </button>
             ))}
           </div>
+
+          {mediaTab === 'computador' && (
+            <>
+              <button type="button" style={s.importBtn} onClick={() => fileRef.current?.click()}>
+                <Plus size={18} /> Importar vídeos
+              </button>
+              <div style={s.libList}>
+                {library.length === 0 && <p style={s.hint}>Os vídeos que você importar ou adicionar aparecem aqui.</p>}
+                {library.map((l) => (
+                  <button key={l.id} type="button" style={s.libItem} onClick={() => addToTimeline(l)} title="Adicionar à linha do tempo">
+                    <div style={{ ...s.libThumb, backgroundImage: l.thumbs[0] ? `url(${l.thumbs[0]})` : 'none' }}>
+                      <span style={s.libDur}>{fmt(l.duration).slice(0, -2)}</span>
+                    </div>
+                    <span style={s.libName}>{l.name}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {mediaTab !== 'computador' && (
+            <div style={s.libList}>
+              {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).length === 0 && (
+                <p style={s.hint}>
+                  {mediaTab === 'brutos'
+                    ? 'Nenhum vídeo bruto salvo ainda. Suas gravações do app aparecem aqui.'
+                    : 'Nenhum vídeo pronto ainda. Exporte um vídeo e ele aparece aqui.'}
+                </p>
+              )}
+              {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).map((v) => (
+                <button key={v.id} type="button" style={s.libItem} onClick={() => addCloud(v)} title="Adicionar à linha do tempo">
+                  <video src={`${v.url}#t=0.5`} preload="metadata" muted style={s.libThumbVideo} />
+                  <span style={s.libName}>{v.originalName || 'Vídeo'}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </aside>
 
         {/* Prévia */}
@@ -624,6 +680,13 @@ const s = {
     border: '1px dashed #34353f', backgroundColor: '#101117', color: '#fff', fontSize: 13, fontWeight: 600,
     cursor: 'pointer', fontFamily: 'inherit',
   },
+  mediaTabs: { display: 'flex', gap: 4, padding: 3, backgroundColor: '#111218', borderRadius: 10, border: '1px solid #1c1d25' },
+  mediaTab: (a) => ({
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, border: 'none', borderRadius: 7,
+    padding: '7px 0', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+    backgroundColor: a ? 'rgba(82,250,53,0.14)' : 'transparent', color: a ? GREEN : '#8a8b95',
+  }),
+  libThumbVideo: { width: 64, height: 42, borderRadius: 7, backgroundColor: '#1a1b22', objectFit: 'cover', flexShrink: 0 },
   libList: { display: 'flex', flexDirection: 'column', gap: 8 },
   libItem: {
     display: 'flex', alignItems: 'center', gap: 10, padding: 6, borderRadius: 10, border: '1px solid #1a1b22',

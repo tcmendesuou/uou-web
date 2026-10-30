@@ -134,7 +134,12 @@ export default function Criar() {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.pageTitle}>Criar</h1>
+      <div style={styles.titleRow}>
+        <h1 style={{ ...styles.pageTitle, margin: 0 }}>Criar</h1>
+        <button style={styles.openEditorBtn} onClick={() => setEditorClips([])}>
+          <Scissors size={16} /> Abrir editor
+        </button>
+      </div>
 
       <div style={styles.tabsRow}>
         {TABS.map((tab) => (
@@ -246,6 +251,25 @@ const styles = {
     fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
     maxWidth: 900,
     margin: '0 auto',
+  },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    margin: '0 0 20px 0',
+  },
+  openEditorBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#52fa35',
+    color: '#000',
+    border: 'none',
+    borderRadius: 10,
+    padding: '10px 18px',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
   },
   pageTitle: {
     color: '#f0f0f0',
