@@ -3,7 +3,7 @@
 // Inclui compartilhar a tela.
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { StreamVideo, StreamCall, BackgroundFiltersProvider } from '@stream-io/video-react-sdk';
 import { db, auth } from '../firebase';
 import { useLiveSession } from '../lib/stream';
@@ -15,6 +15,7 @@ import { LiveStage, HostControls } from '../components/LiveStage';
 import LiveChat from '../components/LiveChat';
 import BackgroundEffects from '../components/BackgroundEffects';
 import LiveInfoPanel from '../components/LiveInfoPanel';
+import { LiveGuestsPanel } from '../components/LiveGuests';
 import { LiveTopBar, LiveInfo, DrawCountdown, WinnerCard } from '../components/LiveOverlays';
 
 // Recorte do fundo: modelo "selfie_segmenter" (mais preciso que o padrão "landscape")
@@ -30,6 +31,7 @@ const PANEL_TABS = [
   { id: 'infos', label: 'Infos' },
   { id: 'chat', label: 'Chat' },
   { id: 'fundos', label: 'Fundos' },
+  { id: 'participantes', label: 'Participantes' },
 ];
 
 export default function LiveHost() {
@@ -210,7 +212,7 @@ export default function LiveHost() {
     body = (
       <>
         <div style={styles.stageBox}>
-          <LiveStage hostId={uid} isHost />
+          <LiveStage hostId={uid} isHost guestIds={live.guestUids || []} />
           {overlays}
         </div>
         <HostControls
@@ -273,10 +275,22 @@ export default function LiveHost() {
           ))}
         </div>
         <div style={{ ...styles.pane, display: panelTab === 'infos' ? 'block' : 'none', overflowY: 'auto' }}>
-          <LiveInfoPanel live={live} clock={clock} remainingSeconds={remaining} />
+          <LiveInfoPanel
+            live={live}
+            clock={clock}
+            remainingSeconds={remaining}
+            onToggleGuestsCompete={() => updateDoc(doc(db, 'lives', liveId), { guestsCompete: !live.guestsCompete }).catch((e) => console.error(e))}
+          />
         </div>
         <div style={{ ...styles.pane, display: panelTab === 'chat' ? 'block' : 'none' }}>
           <LiveChat liveId={liveId} userName={me.name} messages={messages} disabled={live.commentsEnabled === false} />
+        </div>
+        <div style={{ ...styles.pane, display: panelTab === 'participantes' ? 'block' : 'none', overflowY: 'auto' }}>
+          {session.status === 'ready' ? (
+            <LiveGuestsPanel liveId={liveId} live={live} hostId={uid} />
+          ) : (
+            <p style={{ ...styles.muted, padding: 14 }}>Os participantes ficam disponíveis quando a transmissão iniciar.</p>
+          )}
         </div>
         <div style={{ ...styles.pane, display: panelTab === 'fundos' ? 'block' : 'none', overflowY: 'auto' }}>
           {session.status === 'ready' ? (
@@ -352,15 +366,18 @@ const styles = {
   tabBar: { display: 'flex', gap: 6, marginBottom: 10, flexShrink: 0 },
   tabBtn: (active) => ({
     flex: 1,
-    padding: '9px 0',
     borderRadius: 10,
     border: active ? '1px solid #52fa35' : '1px solid #1a1a1a',
     backgroundColor: active ? 'rgba(82, 250, 53, 0.1)' : '#0d0d0d',
     color: active ? '#52fa35' : '#aaa',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 700,
     cursor: 'pointer',
     fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    padding: '9px 2px',
   }),
   pane: { flex: 1, minHeight: 0 },
   centerPage: {

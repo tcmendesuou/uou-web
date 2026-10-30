@@ -8,6 +8,7 @@ import {
   useCall,
   hasScreenShare,
   hasVideo,
+  hasAudio,
 } from '@stream-io/video-react-sdk';
 import '@stream-io/video-react-sdk/dist/css/styles.css';
 import {
@@ -26,10 +27,11 @@ const STAGE_CSS = `
 .uou-stage .str-video__menu-container, .uou-pip .str-video__menu-container { display:none; }
 `;
 
-export function LiveStage({ hostId, isHost = false, waitingText = 'Aguardando transmissão...' }) {
+export function LiveStage({ hostId, isHost = false, waitingText = 'Aguardando transmissão...', guestIds = [] }) {
   const { useParticipants } = useCallStateHooks();
   const participants = useParticipants();
   const host = participants.find((p) => p.userId === hostId);
+  const guests = guestIds.map((id) => participants.find((p) => p.userId === id)).filter(Boolean);
 
   const sharing = !!host && hasScreenShare(host);
   const cameraOn = !!host && hasVideo(host);
@@ -60,9 +62,19 @@ export function LiveStage({ hostId, isHost = false, waitingText = 'Aguardando tr
   }
 
   return (
-    <div className="uou-stage" style={styles.stage}>
+    <div className="uou-stage" style={{ ...styles.stage, display: 'flex', gap: guests.length ? 6 : 0 }}>
       <style>{STAGE_CSS}</style>
-      {body}
+      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>{body}</div>
+      {guests.length > 0 && (
+        <div style={styles.guestCol}>
+          {guests.map((p) => (
+            <div key={p.userId} className="uou-pip" style={styles.guestTile}>
+              <ParticipantView participant={p} trackType="videoTrack" />
+              <span style={styles.guestName}>{!hasAudio(p) && <MicOff size={11} />} {p.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -176,6 +188,12 @@ const styles = {
     gap: 12,
   },
   placeholderText: { color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: 0 },
+  guestCol: { width: '24%', minWidth: 120, maxWidth: 220, display: 'flex', flexDirection: 'column', gap: 6 },
+  guestTile: { position: 'relative', flex: 1, minHeight: 0, borderRadius: 10, overflow: 'hidden', backgroundColor: '#111' },
+  guestName: {
+    position: 'absolute', left: 6, bottom: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 4, color: '#fff', fontSize: 11, fontWeight: 700,
+    textShadow: '0 1px 3px #000', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+  },
   pip: {
     position: 'absolute',
     right: 14,

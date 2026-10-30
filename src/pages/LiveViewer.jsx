@@ -12,6 +12,7 @@ import {
   PREVIEW_SECONDS, brl, getAccess, markPreviewed, payForLive, incrementViewers,
 } from '../lib/liveLogic';
 import { LiveStage } from '../components/LiveStage';
+import { GuestViewerBar } from '../components/LiveGuests';
 import LiveChat from '../components/LiveChat';
 import { LiveTopBar, LiveInfo, DrawCountdown, WinnerCard } from '../components/LiveOverlays';
 
@@ -225,7 +226,8 @@ export default function LiveViewer() {
           {session.status === 'ready' ? (
             <StreamVideo client={session.client}>
               <StreamCall call={session.call}>
-                <LiveStage hostId={live.userId} />
+                <LiveStage hostId={live.userId} guestIds={live.guestUids || []} />
+                {!isOwner && <GuestViewerBar liveId={liveId} />}
               </StreamCall>
             </StreamVideo>
           ) : session.status === 'error' ? (

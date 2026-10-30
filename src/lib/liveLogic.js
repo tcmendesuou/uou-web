@@ -427,7 +427,11 @@ export async function executePrizeDraw(liveId) {
       )
     );
 
-    if (accessSnapshot.empty) {
+    // Convidados do palco só concorrem se o criador permitiu (guestsCompete)
+    const excluded = live.guestsCompete ? [] : (live.guestHistory || []);
+    const payers = accessSnapshot.docs.map((d) => d.data()).filter((p) => !excluded.includes(p.userId));
+
+    if (payers.length === 0) {
       // Ninguém pagou: devolve a reserva do criador (qualquer modo premiado)
       if (live.prizeReserve > 0) {
         await updateDoc(doc(db, 'users', live.userId), { wallet: increment(live.prizeReserve) });
@@ -444,7 +448,6 @@ export async function executePrizeDraw(liveId) {
       return;
     }
 
-    const payers = accessSnapshot.docs.map((d) => d.data());
     const winner = payers[Math.floor(Math.random() * payers.length)];
 
     let prizeValue = 0;

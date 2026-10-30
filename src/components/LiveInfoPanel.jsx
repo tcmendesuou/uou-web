@@ -15,7 +15,7 @@ const when = (iso) => {
   return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
-export default function LiveInfoPanel({ live, clock, remainingSeconds }) {
+export default function LiveInfoPanel({ live, clock, remainingSeconds, onToggleGuestsCompete }) {
   if (!live) return null;
   const isLive = live.status === 'live';
   const premium = !!live.isPremium;
@@ -72,6 +72,12 @@ export default function LiveInfoPanel({ live, clock, remainingSeconds }) {
             <p style={s.note}>O prêmio cresce conforme os espectadores entram e nunca fica abaixo da garantia.</p>
           )}
           {live.winnerName && <p style={s.winner}>Ganhador: {live.winnerName}</p>}
+          {onToggleGuestsCompete && !live.prizeDrawnAt && (
+            <button type="button" style={s.toggleRow} onClick={onToggleGuestsCompete}>
+              <span style={s.toggleTrack(!!live.guestsCompete)}><span style={s.toggleKnob(!!live.guestsCompete)} /></span>
+              <span>Convidados do palco concorrem ao prêmio</span>
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -131,6 +137,12 @@ const s = {
   line: { color: '#bbb', fontSize: 13, margin: '6px 0 0 0' },
   rows: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 },
   row: { display: 'flex', justifyContent: 'space-between', fontSize: 13 },
+  toggleRow: {
+    display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: 12, padding: 0, border: 'none', background: 'transparent',
+    color: '#ddd', fontSize: 12.5, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  toggleTrack: (on) => ({ width: 34, height: 20, borderRadius: 10, backgroundColor: on ? '#52fa35' : '#333', position: 'relative', flexShrink: 0 }),
+  toggleKnob: (on) => ({ position: 'absolute', top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: '50%', backgroundColor: '#000' }),
   note: { color: '#777', fontSize: 11.5, lineHeight: 1.5, margin: '10px 0 0 0' },
   winner: { color: '#fff', fontSize: 13, fontWeight: 700, margin: '10px 0 0 0' },
 };
