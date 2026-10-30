@@ -195,32 +195,6 @@ export default function Criar() {
         ))}
       </div>
 
-      <div style={styles.projectsBox}>
-        <p style={styles.projectsTitle}><Film size={15} color="#52fa35" /> Projetos em andamento</p>
-        {projects.length === 0 ? (
-          <p style={{ ...styles.emptyText, margin: 0 }}>Seus projetos de edição aparecem aqui para você continuar depois.</p>
-        ) : (
-          <div style={styles.projectsRow}>
-            {projects.map((p) => (
-              <div key={p.id} style={styles.projectCard}>
-                <button style={styles.projectOpen} onClick={() => { setEditorClips(null); setEditorProject(p); }}>
-                  <div style={{ ...styles.projectThumb, backgroundImage: p.thumb ? `url(${p.thumb})` : 'none' }}>
-                    {!p.thumb && <Film size={22} color="#333" />}
-                  </div>
-                  <span style={styles.projectName}>{p.name || 'Projeto sem título'}</span>
-                  <span style={styles.projectMeta}>
-                    {Math.round(p.duration || 0)}s · {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('pt-BR') : ''}
-                  </span>
-                </button>
-                <button style={styles.projectDelete} onClick={() => handleDeleteProject(p)} aria-label="Excluir projeto">
-                  <Trash2 size={14} color="#ff4444" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {activeTab === 'prontos' && (
         <div>
           {prontos.length === 0 ? (
@@ -302,6 +276,32 @@ export default function Criar() {
         </div>
       )}
 
+      <div style={styles.projectsBox}>
+        <p style={styles.projectsTitle}><Film size={15} color="#52fa35" /> Projetos em andamento</p>
+        {projects.length === 0 ? (
+          <p style={{ ...styles.emptyText, margin: 0 }}>Seus projetos de edição aparecem aqui para você continuar depois.</p>
+        ) : (
+          <div style={styles.projectsRow}>
+            {projects.map((p) => (
+              <div key={p.id} style={styles.projectCard}>
+                <button style={styles.projectOpen} onClick={() => { setEditorClips(null); setEditorProject(p); }}>
+                  <div style={{ ...styles.projectThumb, backgroundImage: p.thumb ? `url(${p.thumb})` : 'none' }}>
+                    {!p.thumb && <Film size={22} color="#333" />}
+                  </div>
+                  <span style={styles.projectName}>{p.name || 'Projeto sem título'}</span>
+                  <span style={styles.projectMeta}>
+                    {Math.round(p.duration || 0)}s · {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('pt-BR') : ''}
+                  </span>
+                </button>
+                <button style={styles.projectDelete} onClick={() => handleDeleteProject(p)} aria-label="Excluir projeto">
+                  <Trash2 size={14} color="#ff4444" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {(editorClips || editorProject) && (
         <VideoEditor
           key={editorProject?.id || 'novo'}
@@ -331,9 +331,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#52fa35',
-    color: '#000',
-    border: 'none',
+    backgroundColor: 'rgba(82, 250, 53, 0.05)',
+    color: '#52fa35',
+    border: '1px solid #52fa35',
     borderRadius: 10,
     padding: '10px 18px',
     fontSize: 13,
@@ -371,7 +371,7 @@ const styles = {
     color: '#52fa35',
   },
   projectsBox: {
-    marginBottom: 24,
+    marginTop: 28,
     padding: 14,
     borderRadius: 14,
     backgroundColor: '#0d0e13',
