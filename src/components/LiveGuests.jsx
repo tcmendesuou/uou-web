@@ -8,7 +8,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection, query, where, onSnapshot, doc, setDoc, updateDoc, arrayUnion, arrayRemove,
 } from 'firebase/firestore';
-import { OwnCapability, useCall, useCallStateHooks } from '@stream-io/video-react-sdk';
+import { OwnCapability, hasAudio, useCall, useCallStateHooks } from '@stream-io/video-react-sdk';
 import { Search, UserPlus, Mic, MicOff, Video, VideoOff, X, LogOut } from 'lucide-react';
 import { db, auth } from '../firebase';
 
@@ -117,11 +117,17 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
       <p style={s.h}>No palco ({guestUids.length}/{MAX_GUESTS})</p>
       {guestUids.length === 0 && <p style={s.hint}>Convide alguém que está assistindo para participar com você.</p>}
       {guestUids.map((uid) => {
-        const online = participants.some((p) => p.userId === uid);
+        const part = participants.find((p) => p.userId === uid);
+        const online = !!part;
+        const muted = online && !hasAudio(part);
         return (
           <div key={uid} style={s.row}>
             <span style={s.name}>{nameOf(uid)}{!online && <i style={{ color: '#777' }}> (fora da live)</i>}</span>
-            <button type="button" style={s.iconBtn} title="Silenciar" onClick={() => mute(uid)}><MicOff size={15} /></button>
+            {muted ? (
+              <button type="button" style={{ ...s.iconBtn, color: '#ff6b6b', borderColor: '#4a1a1a', backgroundColor: '#2a1212', cursor: 'default' }} title="Microfone desligado" disabled><MicOff size={15} /></button>
+            ) : (
+              <button type="button" style={{ ...s.iconBtn, color: GREEN, borderColor: 'rgba(82,250,53,0.4)' }} title="Silenciar" onClick={() => mute(uid)}><Mic size={15} /></button>
+            )}
             <button type="button" style={{ ...s.iconBtn, color: '#ff6b6b' }} title="Remover do palco" onClick={() => removeFromStage(uid)}><X size={15} /></button>
           </div>
         );

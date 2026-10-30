@@ -67,7 +67,7 @@ export function LiveStage({ hostId, isHost = false, waitingText = 'Aguardando tr
   return (
     <div className="uou-stage" style={{ ...styles.stage, ...gridFor(guests.length + 1) }}>
       <style>{STAGE_CSS}</style>
-      <div style={styles.tile}>{body}</div>
+      <div className={guests.length && !sharing ? 'uou-split' : undefined} style={styles.tile}>{body}</div>
       {guests.map((p) => (
         <div key={p.userId} className="uou-split" style={styles.tile}>
           <ParticipantView participant={p} trackType="videoTrack" />
