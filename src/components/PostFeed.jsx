@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
-  Heart, MessageCircle, Send, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Radio, Users, CalendarClock,
+  Heart, MessageCircle, Send, Lock, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Radio, Users, CalendarClock,
 } from 'lucide-react';
 
 // ✅ Mesma lógica de data relativa do HomeScreen.js do App
@@ -352,7 +352,9 @@ function PostCard({ post, onWheel, following }) {
   const photoSrc = thumb || url;
   const videoRef = useRef(null);
   const [paused, setPaused] = useState(false);
-  const many = medias.length > 1;
+  // Post exclusivo para assinantes: a web ainda não tem assinatura, então só o dono vê
+  const locked = !!post.exclusive && post.userId !== auth.currentUser?.uid;
+  const many = !locked && medias.length > 1;
 
   const togglePlay = () => {
     if (!isVideo) return;
@@ -374,7 +376,13 @@ function PostCard({ post, onWheel, following }) {
   return (
     <div style={styles.card} onWheel={onWheel}>
       <div style={styles.mediaBox} onClick={togglePlay}>
-        {isVideo ? (
+        {locked ? (
+          <div style={styles.lockedBox}>
+            <Lock size={34} color="#52fa35" />
+            <p style={styles.lockedTitle}>Conteúdo exclusivo para assinantes</p>
+            <p style={styles.lockedSub}>Assine pelo app para ver este post.</p>
+          </div>
+        ) : isVideo ? (
           <video key={url} ref={videoRef} src={url} poster={thumb || undefined} preload="auto" style={styles.mediaContain} autoPlay loop muted={false} playsInline />
         ) : (
           <>
@@ -432,7 +440,7 @@ function PostCard({ post, onWheel, following }) {
 
       {/* Legenda — embaixo, com degradê */}
       <div style={styles.bottomInfo}>
-        {post.caption && <p style={styles.caption}>{post.caption}</p>}
+        {!locked && post.caption && <p style={styles.caption}>{post.caption}</p>}
       </div>
     </div>
   );
@@ -529,6 +537,13 @@ const styles = {
     objectFit: 'cover',
     display: 'block',
   },
+  lockedBox: {
+    width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', gap: '8px', padding: '0 28px', textAlign: 'center', boxSizing: 'border-box',
+    background: 'linear-gradient(160deg, #0b0b12, #050508)',
+  },
+  lockedTitle: { color: '#fff', fontSize: '15px', fontWeight: '700', margin: '6px 0 0 0' },
+  lockedSub: { color: '#888', fontSize: '12px', margin: 0 },
   mediaBlur: {
     position: 'absolute',
     inset: 0,

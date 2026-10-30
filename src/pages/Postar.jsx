@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc, getDoc, doc, updateDoc } from 'firebase/firestore';
 import { storage, db, auth } from '../firebase';
-import { Images, Plus, X, Play, ImageOff, Radio } from 'lucide-react';
+import { Images, Plus, X, Radio, Camera, Smile, MapPin, Music2, Maximize, RefreshCw } from 'lucide-react';
 import LiveForm from '../components/LiveForm';
 
 const MAX_MEDIA = 3;
@@ -123,34 +123,82 @@ function PostarVideoPronto({ video, onDone }) {
   );
 }
 
+// ✅ Miniatura (capa) como no app: foto reduzida a 600px; vídeo = frame real.
+// Se falhar, o post sai sem capa (igual ao app).
+async function makeThumbBlob(file, type) {
+  try {
+    const url = URL.createObjectURL(file);
+    try {
+      let source; let w; let h;
+      if (type === 'video') {
+        const video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.src = url;
+        await new Promise((resolve, reject) => {
+          video.onloadeddata = resolve;
+          video.onerror = reject;
+        });
+        video.currentTime = Math.min(0.5, (video.duration || 1) / 2);
+        await new Promise((resolve) => { video.onseeked = resolve; });
+        source = video; w = video.videoWidth; h = video.videoHeight;
+      } else {
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        source = img; w = img.naturalWidth; h = img.naturalHeight;
+      }
+      if (!w || !h) return null;
+      const scale = Math.min(1, 600 / w);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+      return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.6));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch (err) {
+    console.error('[Criar] Não foi possível gerar a capa:', err);
+    return null;
+  }
+}
+
+const SUGGESTED_TAGS = ['#butter', '#bastidores', '#novo'];
+const uniqueSuffix = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+// Tela "Criar" igual ao app: área de mídia + folha com legenda, sugestões,
+// miniaturas, ações e botão Publicar.
 function PostarNovo() {
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
   const [mediaList, setMediaList] = useState([]); // [{file, previewUrl, type}]
+  const [active, setActive] = useState(0);
   const [caption, setCaption] = useState('');
+  const [exclusive, setExclusive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError] = useState('');
 
+  const pickFiles = () => fileInputRef.current?.click();
+
   const handlePickFiles = (e) => {
     const files = Array.from(e.target.files || []);
+    e.target.value = ''; // permite escolher o mesmo arquivo de novo depois
     if (files.length === 0) return;
-
     const remaining = MAX_MEDIA - mediaList.length;
     if (remaining <= 0) {
       setError(`Você pode adicionar no máximo ${MAX_MEDIA} mídias.`);
-      e.target.value = '';
       return;
     }
-
     const newItems = files.slice(0, remaining).map((file) => ({
       file,
       previewUrl: URL.createObjectURL(file),
       type: file.type.startsWith('video') ? 'video' : 'photo',
     }));
-
     setMediaList((prev) => [...prev, ...newItems].slice(0, MAX_MEDIA));
     setError('');
-    e.target.value = ''; // permite selecionar o mesmo arquivo de novo depois
   };
 
   const removeMedia = (index) => {
@@ -160,47 +208,47 @@ function PostarNovo() {
       updated.splice(index, 1);
       return updated;
     });
+    setActive(0);
   };
 
-  const uploadSingleMedia = async (item, index) => {
-    setUploadProgress(`Enviando mídia ${index + 1} de ${mediaList.length}...`);
-    const fileExtension = item.type === 'video' ? 'mp4' : 'jpg';
-    const fileName = `${Date.now()}_${index}.${fileExtension}`;
-    const storageRef = ref(storage, `posts/${auth.currentUser.uid}/${fileName}`);
+  const uploadOne = async (item, index, total) => {
+    setUploadProgress(`Enviando mídia ${index + 1} de ${total}...`);
+    const uid = auth.currentUser.uid;
+    const ext = item.type === 'video' ? 'mp4' : 'jpg';
+    const storageRef = ref(storage, `posts/${uid}/post_${uniqueSuffix()}.${ext}`);
     await uploadBytes(storageRef, item.file);
-    const downloadURL = await getDownloadURL(storageRef);
-    return { url: downloadURL, type: item.type };
+    const url = await getDownloadURL(storageRef);
+
+    let thumbnailUrl = null;
+    const thumbBlob = await makeThumbBlob(item.file, item.type);
+    if (thumbBlob) {
+      try {
+        const thumbRef = ref(storage, `thumbnails/${uid}/thumb_${uniqueSuffix()}.jpg`);
+        await uploadBytes(thumbRef, thumbBlob);
+        thumbnailUrl = await getDownloadURL(thumbRef);
+      } catch (err) {
+        console.error('[Criar] Erro ao enviar a capa:', err);
+      }
+    }
+    return { type: item.type, url, thumbnailUrl };
   };
 
   const handlePost = async () => {
     setError('');
-    if (mediaList.length === 0) {
-      setError('Selecione pelo menos uma foto ou vídeo');
-      return;
-    }
-    if (!caption.trim()) {
-      setError('Adicione uma legenda');
-      return;
-    }
+    if (mediaList.length === 0) return;
 
     setUploading(true);
     try {
-      const uploadedItems = [];
+      const uploaded = [];
       for (let i = 0; i < mediaList.length; i++) {
-        const uploaded = await uploadSingleMedia(mediaList[i], i);
-        uploadedItems.push(uploaded);
+        uploaded.push(await uploadOne(mediaList[i], i, mediaList.length));
       }
-
       setUploadProgress('Salvando post...');
 
       const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
       const userData = userDoc.exists() ? userDoc.data() : {};
-
-      await addDoc(collection(db, 'posts'), {
-        type: 'carousel',
-        mediaItems: uploadedItems,
-        mediaUrl: uploadedItems[0].url,
-        mediaType: uploadedItems[0].type,
+      const base = {
+        exclusive,
         caption: caption.trim(),
         userId: auth.currentUser.uid,
         userName: userData?.name || 'Usuário',
@@ -208,14 +256,32 @@ function PostarNovo() {
         likes: 0,
         commentsCount: 0,
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      // Igual ao app: 1 mídia = foto/vídeo com capa; 2 ou 3 = carrossel
+      if (uploaded.length === 1) {
+        const one = uploaded[0];
+        await addDoc(collection(db, 'posts'), {
+          type: one.type === 'video' ? 'video' : 'photo',
+          mediaType: one.type,
+          mediaUrl: one.url,
+          thumbnailUrl: one.thumbnailUrl,
+          ...base,
+        });
+      } else {
+        await addDoc(collection(db, 'posts'), {
+          type: 'carousel',
+          mediaItems: uploaded,
+          mediaUrl: uploaded[0].url,
+          mediaType: uploaded[0].type,
+          ...base,
+        });
+      }
 
       mediaList.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      setMediaList([]);
-      setCaption('');
       navigate('/');
     } catch (err) {
-      console.error('[Postar] Erro ao criar post:', err);
+      console.error('[Criar] Erro ao criar post:', err);
       setError('Não foi possível criar o post. Tente novamente.');
     } finally {
       setUploading(false);
@@ -223,110 +289,155 @@ function PostarNovo() {
     }
   };
 
-  const canPost = mediaList.length > 0 && caption.trim().length > 0 && !uploading;
+  const blocked = mediaList.length === 0 || uploading;
+  const current = mediaList[Math.min(active, mediaList.length - 1)];
 
   return (
-    <div style={styles.container}>
-      <div style={styles.headerRow}>
-        <h1 style={styles.pageTitle}>Novo Post</h1>
-        <button style={styles.postButton(canPost)} onClick={handlePost} disabled={!canPost}>
-          {uploading ? 'Enviando...' : 'Postar'}
+    <div style={ns.page}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        onChange={handlePickFiles}
+        style={{ display: 'none' }}
+      />
+
+      <div style={ns.topBar}>
+        <button type="button" style={ns.roundBtn} onClick={() => navigate(-1)} aria-label="Fechar">
+          <X size={20} color="#fff" />
+        </button>
+        <span style={ns.titlePill}>Novo post</span>
+        <button type="button" style={ns.draftsChip} onClick={() => window.alert('Nenhum rascunho ainda.')}>
+          Rascunhos
         </button>
       </div>
 
-      {error && <p style={styles.errorText}>{error}</p>}
-
-      {/* Preview das mídias selecionadas */}
-      {mediaList.length > 0 && (
-        <div style={styles.previewRow}>
-          {mediaList.map((item, index) => (
-            <div key={item.previewUrl} style={styles.mediaThumb}>
-              {item.type === 'video' ? (
-                <video src={item.previewUrl} style={styles.thumbMedia} muted />
-              ) : (
-                <img src={item.previewUrl} alt="" style={styles.thumbMedia} />
-              )}
-              {item.type === 'video' && (
-                <div style={styles.videoBadge}>
-                  <Play size={16} color="#fff" fill="#fff" />
-                </div>
-              )}
-              <button
-                type="button"
-                style={styles.removeButton}
-                onClick={() => removeMedia(index)}
-                aria-label="Remover mídia"
-              >
-                <X size={14} color="#fff" />
-              </button>
-              <div style={styles.thumbIndex}>{index + 1}</div>
-            </div>
-          ))}
+      {/* Área de mídia */}
+      {current ? (
+        <div style={ns.stage}>
+          {current.type === 'video' ? (
+            <video key={current.previewUrl} src={current.previewUrl} style={ns.stageMedia} controls playsInline />
+          ) : (
+            <img src={current.previewUrl} alt="" style={ns.stageMedia} />
+          )}
+          <button type="button" style={ns.swapChip} onClick={pickFiles}>
+            <RefreshCw size={12} /> Trocar
+          </button>
         </div>
+      ) : (
+        <button type="button" style={ns.emptyPlate} onClick={pickFiles}>
+          <span style={ns.emptyIcon}><Camera size={20} color="#fff" /></span>
+          <span style={ns.emptyTitle}>Adicionar mídia</span>
+          <span style={ns.emptySub}>Foto, vídeo ou galeria</span>
+        </button>
       )}
 
-      {/* Botões de adicionar mídia */}
-      <div style={styles.addButtonsRow}>
-        <label style={{ ...styles.addButton, ...(mediaList.length >= MAX_MEDIA ? styles.addButtonDisabled : {}) }}>
-          <Images size={20} color={mediaList.length >= MAX_MEDIA ? '#444' : '#f0f0f0'} />
-          <span style={mediaList.length >= MAX_MEDIA ? styles.addButtonTextDisabled : styles.addButtonText}>
-            Selecionar várias
-          </span>
-          <input
-            type="file"
-            accept="image/*,video/*"
-            multiple
-            onChange={handlePickFiles}
-            disabled={mediaList.length >= MAX_MEDIA}
-            style={styles.hiddenInput}
-          />
-        </label>
+      {error && <p style={ns.error}>{error}</p>}
 
-        <label style={{ ...styles.addButton, ...(mediaList.length >= MAX_MEDIA ? styles.addButtonDisabled : {}) }}>
-          <Plus size={20} color={mediaList.length >= MAX_MEDIA ? '#444' : '#f0f0f0'} />
-          <span style={mediaList.length >= MAX_MEDIA ? styles.addButtonTextDisabled : styles.addButtonText}>
-            Adicionar uma
-          </span>
-          <input
-            type="file"
-            accept="image/*,video/*"
-            onChange={handlePickFiles}
-            disabled={mediaList.length >= MAX_MEDIA}
-            style={styles.hiddenInput}
-          />
-        </label>
-      </div>
+      {/* Folha inferior */}
+      <div style={ns.sheet}>
+        <div style={ns.audienceRow}>
+          <span style={ns.audienceLabel}>{exclusive ? 'Só assinantes podem ver' : 'Todos podem ver'}</span>
+          <div style={ns.audienceRight}>
+            <span style={ns.audienceHint}>Assinantes</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={exclusive}
+              aria-label="Exclusivo para assinantes"
+              onClick={() => setExclusive((v) => !v)}
+              style={{ ...ns.switchTrack, backgroundColor: exclusive ? '#00FF00' : '#333' }}
+            >
+              <span style={{ ...ns.switchKnob, left: exclusive ? 18 : 2 }} />
+            </button>
+          </div>
+        </div>
 
-      <p style={styles.mediaCounter}>
-        {mediaList.length}/{MAX_MEDIA} mídias selecionadas
-        {mediaList.length === 0 && ' — selecione pelo menos 1'}
-      </p>
-
-      {/* Legenda */}
-      <div style={styles.captionWrap}>
         <textarea
-          style={styles.captionInput}
+          style={ns.caption}
           placeholder="Escreva uma legenda..."
           value={caption}
           onChange={(e) => setCaption(e.target.value.slice(0, 500))}
-          rows={4}
+          rows={2}
         />
-        <p style={styles.captionCounter}>{caption.length}/500</p>
-      </div>
 
-      {/* Dicas */}
-      <div style={styles.tips}>
-        <p style={styles.tipsTitle}>💡 Dicas:</p>
-        <p style={styles.tipText}>• Adicione até 3 fotos ou vídeos no mesmo post</p>
-        <p style={styles.tipText}>• Você pode misturar fotos e vídeos</p>
-        <p style={styles.tipText}>• Vídeos ficam melhores em até 60 segundos</p>
-      </div>
-
-      {mediaList.length === 0 && (
-        <div style={styles.emptyHint}>
-          <ImageOff size={32} color="#333" />
+        <div style={ns.suggestRow}>
+          <span style={ns.suggestLabel}>Sugestões</span>
+          {SUGGESTED_TAGS.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              style={ns.suggestTag}
+              onClick={() => setCaption((prev) => (prev ? `${prev} ${tag}` : tag).slice(0, 500))}
+            >
+              {tag}
+            </button>
+          ))}
         </div>
-      )}
+
+        <div style={ns.thumbRow}>
+          {[0, 1, 2].map((slot) => {
+            const item = mediaList[slot];
+            if (item) {
+              return (
+                <div
+                  key={item.previewUrl}
+                  style={{ ...ns.thumb, ...(slot === active ? ns.thumbActive : {}) }}
+                  onClick={() => setActive(slot)}
+                >
+                  {item.type === 'video' ? (
+                    <video src={item.previewUrl} style={ns.thumbMedia} muted />
+                  ) : (
+                    <img src={item.previewUrl} alt="" style={ns.thumbMedia} />
+                  )}
+                  <button
+                    type="button"
+                    style={ns.thumbRemove}
+                    onClick={(e) => { e.stopPropagation(); removeMedia(slot); }}
+                    aria-label="Remover mídia"
+                  >
+                    <X size={11} color="#fff" />
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <button key={`empty-${slot}`} type="button" style={ns.thumbEmpty} onClick={pickFiles}>
+                {slot === mediaList.length && <Plus size={16} color="rgba(255,255,255,0.45)" />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={ns.actionRow}>
+          {[
+            { label: 'Marcar', icon: Smile },
+            { label: 'Local', icon: MapPin },
+            { label: 'Música', icon: Music2 },
+            { label: 'Capa', icon: Maximize },
+          ].map(({ label, icon: Icon }) => (
+            <button
+              key={label}
+              type="button"
+              style={ns.action}
+              onClick={() => window.alert(`${label}: em breve na web.`)}
+            >
+              <Icon size={17} color="#fff" />
+              <span style={ns.actionLabel}>{label}</span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          style={{ ...ns.publish, ...(blocked ? ns.publishDisabled : {}) }}
+          onClick={handlePost}
+          disabled={blocked}
+        >
+          {uploading ? 'Enviando...' : 'Publicar'}
+        </button>
+      </div>
 
       {uploading && (
         <div style={styles.uploadingOverlay}>
@@ -337,6 +448,108 @@ function PostarNovo() {
     </div>
   );
 }
+
+// Estilos da tela Criar (copiados do app: CameraScreen.js)
+const ns = {
+  page: {
+    fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
+    maxWidth: 480,
+    margin: '0 auto',
+  },
+  topBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  roundBtn: {
+    width: 38, height: 38, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(5,5,6,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+  },
+  titlePill: {
+    padding: '9px 22px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(5,5,6,0.55)', color: '#fff', fontSize: 15, fontWeight: 600,
+  },
+  draftsChip: {
+    padding: '9px 18px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(5,5,6,0.55)', color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: 500,
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  emptyPlate: {
+    width: '100%', height: 280, borderRadius: 16, border: '1px dashed rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', gap: 8, cursor: 'pointer', fontFamily: 'inherit',
+  },
+  emptyIcon: {
+    width: 46, height: 46, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.10)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 2,
+  },
+  emptyTitle: { color: '#fff', fontSize: 15, fontWeight: 600 },
+  emptySub: { color: 'rgba(255,255,255,0.5)', fontSize: 12.5 },
+  stage: {
+    position: 'relative', width: '100%', height: 340, borderRadius: 16, overflow: 'hidden', backgroundColor: '#000',
+    border: '1px solid rgba(255,255,255,0.12)',
+  },
+  stageMedia: { width: '100%', height: '100%', objectFit: 'contain', display: 'block' },
+  swapChip: {
+    position: 'absolute', right: 10, bottom: 10, display: 'flex', alignItems: 'center', gap: 6,
+    padding: '6px 12px', borderRadius: 999, border: 'none', backgroundColor: 'rgba(0,0,0,0.6)',
+    color: '#fff', fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+  },
+  error: { color: '#ff4444', fontSize: 13, margin: '10px 0 0 0' },
+  sheet: {
+    marginTop: 18, padding: 18, backgroundColor: 'rgba(8,8,10,0.76)',
+    border: '1px solid rgba(255,255,255,0.12)', borderRadius: 26,
+  },
+  audienceRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  audienceLabel: { color: '#fff', fontSize: 13 },
+  audienceRight: { display: 'flex', alignItems: 'center', gap: 8 },
+  audienceHint: { color: 'rgba(255,255,255,0.5)', fontSize: 12 },
+  switchTrack: {
+    position: 'relative', width: 40, height: 24, borderRadius: 12, border: 'none', padding: 0, cursor: 'pointer',
+  },
+  switchKnob: {
+    position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%', backgroundColor: '#fff',
+    transition: 'left 0.15s',
+  },
+  caption: {
+    width: '100%', marginTop: 12, minHeight: 42, padding: 0, border: 'none', outline: 'none', resize: 'none',
+    backgroundColor: 'transparent', color: '#fff', fontSize: 14, lineHeight: '21px', fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  },
+  suggestRow: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  suggestLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 11 },
+  suggestTag: {
+    color: '#00CED1', fontSize: 12, background: 'transparent', border: 'none', padding: 0,
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  thumbRow: { marginTop: 14, display: 'flex', alignItems: 'center', gap: 8 },
+  thumb: {
+    position: 'relative', width: 52, height: 52, borderRadius: 10, overflow: 'hidden', backgroundColor: '#0a0a0a',
+    cursor: 'pointer', boxSizing: 'border-box',
+  },
+  thumbActive: { border: '2px solid rgba(255,255,255,0.9)' },
+  thumbMedia: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  thumbRemove: {
+    position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: '50%', border: 'none',
+    backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', padding: 0,
+  },
+  thumbEmpty: {
+    width: 52, height: 52, borderRadius: 10, border: '1px dashed rgba(255,255,255,0.25)',
+    backgroundColor: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', padding: 0,
+  },
+  actionRow: {
+    marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.10)',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  },
+  action: {
+    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+    background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  actionLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 10 },
+  publish: {
+    marginTop: 14, height: 52, width: '100%', borderRadius: 999, border: 'none',
+    backgroundColor: '#00FF00', color: '#000', fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+  },
+  publishDisabled: { backgroundColor: '#333', color: '#999', cursor: 'default' },
+};
 
 const styles = {
   modeTabs: {
