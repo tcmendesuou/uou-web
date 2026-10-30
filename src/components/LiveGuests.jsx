@@ -2,7 +2,7 @@
 // Convidados no palco da live: o criador convida quem está assistindo (até 3).
 //  - LiveGuestsPanel: aba "Participantes" do criador (buscar, convidar, mutar, remover).
 //  - GuestViewerBar:  parte do convidado (aceitar/recusar e controles de câmera/microfone).
-// Convites ficam em live_guests/{liveId}_{uid}: invited → accepted → onstage → removed/left.
+// Convites ficam em live_guests/{liveId}_{uid}: invited → onstage (aceitou) → removed/left; declined/canceled.
 // Quem libera/tira a permissão de câmera e microfone no GetStream é sempre o navegador do criador.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -50,47 +50,38 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
     await updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status });
   };
 
-  // Quando o convidado aceita (ou sai), o criador libera (ou tira) a permissão
+  // Limpeza: quando o convidado recusa, sai ou o convite é cancelado, o criador tira a permissão (uma vez por mudança)
+  const doneRef = useRef(new Set());
   useEffect(() => {
     if (!call) return;
-    invites.forEach(async (inv) => {
+    const current = new Set(invites.map((i) => `${i.id}:${i.status}`));
+    doneRef.current.forEach((k) => { if (!current.has(k)) doneRef.current.delete(k); });
+    invites.forEach((inv) => {
       const key = `${inv.id}:${inv.status}`;
-      if (busyRef.current.has(key)) return;
-      if (inv.status === 'accepted') {
-        busyRef.current.add(key);
-        try {
-          if (guestUids.length >= MAX_GUESTS && !guestUids.includes(inv.userId)) {
-            await updateDoc(doc(db, 'live_guests', inv.id), { status: 'declined' });
-            return;
-          }
-          await call.updateUserPermissions({
-            user_id: inv.userId,
-            grant_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
-          });
-          await updateDoc(doc(db, 'lives', liveId), {
-            guestUids: arrayUnion(inv.userId),
-            guestHistory: arrayUnion(inv.userId),
-          });
-          await updateDoc(doc(db, 'live_guests', inv.id), { status: 'onstage' });
-        } catch (err) {
-          console.error('[LiveGuests] liberar convidado:', err);
-          setError('Não foi possível colocar o convidado no palco. Tente de novo.');
-          busyRef.current.delete(key);
-        }
-      } else if (inv.status === 'left' && guestUids.includes(inv.userId)) {
-        busyRef.current.add(key);
-        removeFromStage(inv.userId, 'left').catch(() => {});
+      if (['declined', 'left', 'canceled'].includes(inv.status) && !doneRef.current.has(key)) {
+        doneRef.current.add(key);
+        call.updateUserPermissions({
+          user_id: inv.userId,
+          revoke_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
+        }).catch((err) => console.warn('[LiveGuests] revogar permissão:', err?.message));
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invites, call, guestUids.join(',')]);
+  }, [invites, call]);
 
   const inviteOf = (uid) => invites.find((i) => i.userId === uid);
+  const onlineIds = participants.map((p) => p.userId);
+  const pendingCount = invites.filter((i) => i.status === 'invited').length;
+  const full = guestUids.filter((id) => onlineIds.includes(id)).length + pendingCount >= MAX_GUESTS;
 
   const invite = async (p) => {
     setError('');
-    if (guestUids.length >= MAX_GUESTS) { setError(`O palco aceita até ${MAX_GUESTS} convidados.`); return; }
+    if (full) { setError(`O palco aceita até ${MAX_GUESTS} convidados.`); return; }
     try {
+      // A permissão sai junto com o convite: quando a pessoa aceitar, entra direto no palco
+      await call.updateUserPermissions({
+        user_id: p.userId,
+        grant_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
+      });
       await setDoc(doc(db, 'live_guests', guestDocId(liveId, p.userId)), {
         liveId,
         hostId,
@@ -120,7 +111,6 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   }, [participants, search, guestUids.join(','), hostId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const full = guestUids.length >= MAX_GUESTS;
 
   return (
     <div style={s.wrap}>
@@ -146,7 +136,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
       {watchers.length === 0 && <p style={s.hint}>{search ? 'Ninguém encontrado com esse nome.' : 'Ninguém assistindo no momento.'}</p>}
       {watchers.map((p) => {
         const inv = inviteOf(p.userId);
-        const pending = inv && (inv.status === 'invited' || inv.status === 'accepted');
+        const pending = inv && inv.status === 'invited';
         return (
           <div key={p.userId} style={s.row}>
             <span style={s.avatar}>{p.image ? <img src={p.image} alt="" style={s.avatarImg} /> : (p.name || '?')[0]}</span>
@@ -206,20 +196,30 @@ export function GuestViewerBar({ liveId }) {
     }
   }, [onStage, canVideo, call]);
 
-  const answer = (next) => updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status: next }).catch((e) => console.error(e));
+  const answer = async (next) => {
+    try {
+      await updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status: next });
+      if (next === 'onstage') {
+        await updateDoc(doc(db, 'lives', liveId), { guestUids: arrayUnion(uid), guestHistory: arrayUnion(uid) });
+      } else if (next === 'left') {
+        await updateDoc(doc(db, 'lives', liveId), { guestUids: arrayRemove(uid) });
+      }
+    } catch (e) {
+      console.error('[guest] responder convite:', e);
+    }
+  };
 
   if (status === 'invited') {
     return (
       <div style={g.banner}>
         <p style={g.bannerText}><b>{inv.hostName || 'O criador'}</b> convidou você para participar da live.</p>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" style={g.accept} onClick={() => answer('accepted')}>Aceitar</button>
+          <button type="button" style={g.accept} onClick={() => answer('onstage')}>Aceitar</button>
           <button type="button" style={g.refuse} onClick={() => answer('declined')}>Agora não</button>
         </div>
       </div>
     );
   }
-  if (status === 'accepted') return <div style={g.banner}><p style={g.bannerText}>Aguardando o criador te colocar no palco...</p></div>;
   if (onStage) {
     return (
       <div style={g.controls}>
