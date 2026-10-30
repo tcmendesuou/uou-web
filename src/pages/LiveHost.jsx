@@ -14,6 +14,7 @@ import {
 import { LiveStage, HostControls } from '../components/LiveStage';
 import LiveChat from '../components/LiveChat';
 import BackgroundEffects from '../components/BackgroundEffects';
+import LiveInfoPanel from '../components/LiveInfoPanel';
 import { LiveTopBar, LiveInfo, DrawCountdown, WinnerCard } from '../components/LiveOverlays';
 
 // Recorte do fundo: modelo "selfie_segmenter" (mais preciso que o padrão "landscape")
@@ -26,6 +27,7 @@ const SEGMENTATION_OPTIONS = { smoothingFactor: 0.9, smoothstepMin: 0.45, smooth
 
 // Abas do painel da direita (para criar novas ferramentas, é só acrescentar aqui)
 const PANEL_TABS = [
+  { id: 'infos', label: 'Infos' },
   { id: 'chat', label: 'Chat' },
   { id: 'fundos', label: 'Fundos' },
 ];
@@ -262,6 +264,9 @@ export default function LiveHost() {
               {t.label}
             </button>
           ))}
+        </div>
+        <div style={{ ...styles.pane, display: panelTab === 'infos' ? 'block' : 'none', overflowY: 'auto' }}>
+          <LiveInfoPanel live={live} clock={clock} remainingSeconds={remaining} />
         </div>
         <div style={{ ...styles.pane, display: panelTab === 'chat' ? 'block' : 'none' }}>
           <LiveChat liveId={liveId} userName={me.name} messages={messages} disabled={live.commentsEnabled === false} />
