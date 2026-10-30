@@ -16,6 +16,20 @@ import LiveChat from '../components/LiveChat';
 import BackgroundEffects from '../components/BackgroundEffects';
 import { LiveTopBar, LiveInfo, DrawCountdown, WinnerCard } from '../components/LiveOverlays';
 
+// Recorte do fundo: modelo "selfie_segmenter" (mais preciso que o padrão "landscape")
+// e máscara um pouco mais generosa, que acompanha melhor quando você se mexe.
+// Ajuste fino: smoothingFactor (0-1, maior = acompanha mais rápido, pode tremer) e
+// smoothstepMin/Max (menores = mantém mais de você na imagem).
+const SEGMENTER_MODEL =
+  'https://unpkg.com/@stream-io/video-filters-web@0.10.0/mediapipe/models/selfie_segmenter.tflite';
+const SEGMENTATION_OPTIONS = { smoothingFactor: 0.9, smoothstepMin: 0.45, smoothstepMax: 0.8 };
+
+// Abas do painel da direita (para criar novas ferramentas, é só acrescentar aqui)
+const PANEL_TABS = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'fundos', label: 'Fundos' },
+];
+
 export default function LiveHost() {
   const { liveId } = useParams();
   const navigate = useNavigate();
@@ -27,6 +41,7 @@ export default function LiveHost() {
   const [me, setMe] = useState({ name: '', photo: '' });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [panelTab, setPanelTab] = useState('chat');
 
   useEffect(() => {
     if (!uid) return;
@@ -184,24 +199,19 @@ export default function LiveHost() {
   let body;
   if (session.status === 'ready') {
     body = (
-      <StreamVideo client={session.client}>
-        <StreamCall call={session.call}>
-          <BackgroundFiltersProvider onError={(err) => console.error('[LiveHost] efeito de fundo:', err)}>
-            <div style={styles.stageBox}>
-              <LiveStage hostId={uid} isHost />
-              {overlays}
-            </div>
-            <HostControls
-              isBackstage={isBackstage}
-              busy={busy}
-              onGoLive={handleGoLive}
-              onEnd={handleEnd}
-              onCancel={handleCancel}
-            />
-            <BackgroundEffects />
-          </BackgroundFiltersProvider>
-        </StreamCall>
-      </StreamVideo>
+      <>
+        <div style={styles.stageBox}>
+          <LiveStage hostId={uid} isHost />
+          {overlays}
+        </div>
+        <HostControls
+          isBackstage={isBackstage}
+          busy={busy}
+          onGoLive={handleGoLive}
+          onEnd={handleEnd}
+          onCancel={handleCancel}
+        />
+      </>
     );
   } else if (session.status === 'error') {
     body = (
@@ -226,7 +236,7 @@ export default function LiveHost() {
     );
   }
 
-  return (
+  const page = (
     <div style={styles.page}>
       <div style={styles.main}>
         <LiveTopBar remainingSeconds={remaining} viewers={live.viewers} backstage={isBackstage} />
@@ -246,9 +256,41 @@ export default function LiveHost() {
       </div>
 
       <div style={styles.chatCol}>
-        <LiveChat liveId={liveId} userName={me.name} messages={messages} disabled={live.commentsEnabled === false} />
+        <div style={styles.tabBar}>
+          {PANEL_TABS.map((t) => (
+            <button key={t.id} type="button" style={styles.tabBtn(panelTab === t.id)} onClick={() => setPanelTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ ...styles.pane, display: panelTab === 'chat' ? 'block' : 'none' }}>
+          <LiveChat liveId={liveId} userName={me.name} messages={messages} disabled={live.commentsEnabled === false} />
+        </div>
+        <div style={{ ...styles.pane, display: panelTab === 'fundos' ? 'block' : 'none', overflowY: 'auto' }}>
+          {session.status === 'ready' ? (
+            <BackgroundEffects />
+          ) : (
+            <p style={{ ...styles.muted, padding: 14 }}>Os fundos ficam disponíveis quando a câmera iniciar.</p>
+          )}
+        </div>
       </div>
     </div>
+  );
+
+  // Os efeitos de fundo precisam do mesmo "contexto" da câmera: envolvem a página inteira
+  if (session.status !== 'ready') return page;
+  return (
+    <StreamVideo client={session.client}>
+      <StreamCall call={session.call}>
+        <BackgroundFiltersProvider
+          modelFilePath={SEGMENTER_MODEL}
+          segmentationOptions={SEGMENTATION_OPTIONS}
+          onError={(err) => console.error('[LiveHost] efeito de fundo:', err)}
+        >
+          {page}
+        </BackgroundFiltersProvider>
+      </StreamCall>
+    </StreamVideo>
   );
 }
 
@@ -294,7 +336,21 @@ const styles = {
     padding: 20,
     textAlign: 'center',
   },
-  chatCol: { minHeight: 0 },
+  chatCol: { minHeight: 0, display: 'flex', flexDirection: 'column' },
+  tabBar: { display: 'flex', gap: 6, marginBottom: 10, flexShrink: 0 },
+  tabBtn: (active) => ({
+    flex: 1,
+    padding: '9px 0',
+    borderRadius: 10,
+    border: active ? '1px solid #52fa35' : '1px solid #1a1a1a',
+    backgroundColor: active ? 'rgba(82, 250, 53, 0.1)' : '#0d0d0d',
+    color: active ? '#52fa35' : '#aaa',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  }),
+  pane: { flex: 1, minHeight: 0 },
   centerPage: {
     fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
     display: 'flex',

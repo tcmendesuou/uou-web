@@ -114,7 +114,7 @@ export default function BackgroundEffects() {
         {!isLoading && active !== 'none' && !isReady && <span style={styles.loading}>preparando...</span>}
       </div>
 
-      <div style={styles.row}>
+      <div style={styles.chipRow}>
         <Chip active={active === 'none'} onClick={() => choose('none', disableBackgroundFilter)}>
           Nenhum
         </Chip>
@@ -228,7 +228,7 @@ function Chip({ active, onClick, children }) {
 
 const styles = {
   box: {
-    marginTop: 14,
+    marginTop: 0,
     padding: 14,
     backgroundColor: '#0d0d0d',
     border: '1px solid #1a1a1a',
@@ -238,7 +238,8 @@ const styles = {
   title: { color: '#f0f0f0', fontSize: 14, fontWeight: 700 },
   loading: { color: '#888', fontSize: 12 },
   groupTitle: { color: '#888', fontSize: 12, fontWeight: 600, margin: '4px 0 8px 0' },
-  row: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  row: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 10 },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   chip: (active) => ({
     padding: '8px 14px',
     borderRadius: 18,
@@ -252,7 +253,7 @@ const styles = {
   }),
   swatch: {
     position: 'relative',
-    width: 110,
+    width: '100%',
     height: 62,
     borderRadius: 10,
     border: 'none',
@@ -265,15 +266,22 @@ const styles = {
   swatchLabel: {
     position: 'absolute',
     left: 6,
+    right: 6,
     bottom: 4,
     color: '#fff',
-    fontSize: 11,
+    fontSize: 10,
+    lineHeight: 1.15,
+    textAlign: 'left',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
     fontWeight: 700,
     textShadow: '0 1px 3px rgba(0,0,0,0.8)',
   },
   upload: {
     position: 'relative',
-    width: 110,
+    width: '100%',
     height: 62,
     borderRadius: 10,
     border: '1px dashed #3a3a3a',
