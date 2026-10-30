@@ -14,6 +14,7 @@ const Postar = lazy(() => import('./pages/Postar'));
 const Lives = lazy(() => import('./pages/Lives'));
 const LiveViewer = lazy(() => import('./pages/LiveViewer'));
 const LiveHost = lazy(() => import('./pages/LiveHost'));
+const EditorTeste = lazy(() => import('./pages/EditorTeste'));
 
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined = carregando, null = deslogado
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="postar" element={<Postar />} />
           <Route path="transmitir/:liveId" element={<LiveHost />} />
           <Route path="criar" element={<Criar />} />
+          <Route path="editor-teste" element={<EditorTeste />} />
           <Route path="carteira" element={<Carteira />} />
 
           {/* Modo Usuário */}
