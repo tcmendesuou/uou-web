@@ -65,6 +65,17 @@ async function makeThumbs(url, duration) {
   return { thumbs, step, ratio };
 }
 
+// Cabeçalho de painel (estilo Premiere): título em aba sublinhada e ≡ no canto.
+// `inset` desfaz o recuo de painéis que têm padding.
+function PanelHead({ title, inset = false }) {
+  return (
+    <div style={{ ...s.panelHead, ...(inset ? { margin: '-14px -14px 4px -14px' } : {}) }}>
+      <span style={s.panelHeadTab}>{title}</span>
+      <span style={s.panelHeadMenu} aria-hidden>≡</span>
+    </div>
+  );
+}
+
 // Projeto salvo → entradas da biblioteca do editor (as miniaturas são refeitas ao abrir)
 const libraryFromProject = (project) => {
   const media = project?.media || [];
@@ -668,7 +679,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         {/* Painel esquerdo: parte de cima = vídeos do projeto; parte de baixo = biblioteca */}
         <aside style={s.sidePanel}>
           <div style={s.sideTop}>
-            <p style={s.panelTitle}>Projeto</p>
+            <PanelHead title="Projeto" inset />
             <div style={s.libList}>
               {library.length === 0 && (
                 <p style={s.hint}>Os vídeos usados nesta edição aparecem aqui. Arraste um vídeo da biblioteca para a linha do tempo.</p>
@@ -693,7 +704,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
           </div>
 
           <div style={s.sideBottom}>
-            <p style={s.panelTitle}>Biblioteca</p>
+            <PanelHead title="Biblioteca" inset />
             <div style={s.mediaTabs}>
               {[
                 { id: 'brutos', label: 'Brutos', icon: Video },
@@ -739,6 +750,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
 
         {/* Prévia */}
         <section style={s.center}>
+          <PanelHead title="Programa" />
           <div style={s.stage}>
             <div style={{ ...s.screen, ...previewBox }}>
               <video ref={videoRef} style={s.video} playsInline />
@@ -762,7 +774,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
 
         {/* Ferramentas */}
         <aside style={s.panel}>
-          <p style={s.panelTitle}>Ferramentas</p>
+          <PanelHead title="Ferramentas" inset />
           <div style={s.toolGrid}>
             {TOOLS.map((t) => {
               const Icon = t.icon;
@@ -827,6 +839,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
 
       {/* Linha do tempo */}
       <div style={s.timeline}>
+        <PanelHead title="Linha do tempo" />
         <div style={s.tlBar}>
           <div style={s.tlTools}>
             <button type="button" style={s.tlBtn} onClick={undo} disabled={!past.length} title="Desfazer"><Undo2 size={16} /></button>
@@ -932,12 +945,12 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
 const s = {
   root: {
     position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', flexDirection: 'column',
-    backgroundColor: '#07080c', color: '#f0f0f0',
+    backgroundColor: '#010208', color: '#f0f0f0',
     fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
   },
   topBar: {
     height: 54, flexShrink: 0, display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center',
-    padding: '0 16px', borderBottom: '1px solid #15161c',
+    padding: '0 16px',
   },
   topLeft: { display: 'flex', alignItems: 'center', gap: 10 },
   iconBtn: {
@@ -973,32 +986,38 @@ const s = {
     border: '1px solid #2a2b35', backgroundColor: 'transparent', color: '#ccc', borderRadius: 10, padding: '8px 18px',
     cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
   },
-  main: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '240px minmax(0, 1fr) 240px', gridTemplateRows: 'minmax(0, 1fr)' },
-  panel: { minHeight: 0, padding: 14, borderRight: '1px solid #15161c', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 },
+  main: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '240px minmax(0, 1fr) 240px', gridTemplateRows: 'minmax(0, 1fr)', gap: 4, padding: '0 4px' },
+  panel: { minHeight: 0, padding: 14, backgroundColor: '#1b1b1d', borderRadius: 3, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 },
+  panelHead: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', height: 34, flexShrink: 0,
+    borderBottom: '1px solid #2a2a2d',
+  },
+  panelHeadTab: { color: '#e6e6e6', fontSize: 12, fontWeight: 600, height: 34, lineHeight: '34px', borderBottom: '2px solid #e6e6e6', boxSizing: 'border-box' },
+  panelHeadMenu: { color: '#777', fontSize: 15 },
   panelTitle: { margin: '0 0 2px 0', fontSize: 12, fontWeight: 700, color: '#8a8b95', letterSpacing: 0.4, textTransform: 'uppercase' },
   importBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', borderRadius: 12,
-    border: '1px dashed #34353f', backgroundColor: '#101117', color: '#fff', fontSize: 13, fontWeight: 600,
+    border: '1px dashed #3a3a3d', backgroundColor: '#222224', color: '#fff', fontSize: 13, fontWeight: 600,
     cursor: 'pointer', fontFamily: 'inherit',
   },
-  mediaTabs: { display: 'flex', gap: 4, padding: 3, backgroundColor: '#111218', borderRadius: 10, border: '1px solid #1c1d25' },
+  mediaTabs: { display: 'flex', gap: 4, padding: 3, backgroundColor: '#222224', borderRadius: 10, border: '1px solid #2a2a2d' },
   mediaTab: (a) => ({
     flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, border: 'none', borderRadius: 7,
     padding: '7px 0', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
     backgroundColor: a ? 'rgba(82,250,53,0.14)' : 'transparent', color: a ? GREEN : '#8a8b95',
   }),
   libThumbVideo: { width: 64, height: 42, borderRadius: 7, backgroundColor: '#1a1b22', objectFit: 'cover', flexShrink: 0 },
-  sidePanel: { minHeight: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid #15161c', overflow: 'hidden' },
-  sideTop: { flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 },
+  sidePanel: { minHeight: 0, display: 'flex', flexDirection: 'column', gap: 4, overflow: 'hidden' },
+  sideTop: { flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10, backgroundColor: '#1b1b1d', borderRadius: 3 },
   sideBottom: {
     flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
-    borderTop: '1px solid #23242c', backgroundColor: '#0a0b10',
+    backgroundColor: '#1b1b1d', borderRadius: 3,
   },
   dropLine: { position: 'absolute', top: 26, bottom: 0, width: 3, marginLeft: -1, backgroundColor: GREEN, zIndex: 6, pointerEvents: 'none' },
   libList: { display: 'flex', flexDirection: 'column', gap: 8 },
   libItem: {
-    display: 'flex', alignItems: 'center', gap: 10, padding: 6, borderRadius: 10, border: '1px solid #1a1b22',
-    backgroundColor: '#0d0e13', cursor: 'pointer', textAlign: 'left', color: 'inherit', fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center', gap: 10, padding: 6, borderRadius: 8, border: '1px solid #2a2a2d',
+    backgroundColor: '#222224', cursor: 'pointer', textAlign: 'left', color: 'inherit', fontFamily: 'inherit',
   },
   libThumb: {
     position: 'relative', width: 64, height: 42, borderRadius: 7, backgroundColor: '#1a1b22',
@@ -1010,18 +1029,18 @@ const s = {
   },
   libName: { fontSize: 12, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   hint: { color: '#666', fontSize: 12, margin: 0, lineHeight: 1.5 },
-  center: { display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden', borderRight: '1px solid #15161c' },
+  center: { display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundColor: '#1b1b1d', borderRadius: 3 },
   stage: { flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden' },
   screen: {
     position: 'relative', backgroundColor: '#000', borderRadius: 10, overflow: 'hidden', maxHeight: '100%',
-    border: '1px solid #1c1d25', boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
   },
   video: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', backgroundColor: '#000' },
   emptyScreen: {
     position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
     justifyContent: 'center', gap: 8,
   },
-  transport: { height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, borderTop: '1px solid #15161c' },
+  transport: { height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, borderTop: '1px solid #2a2a2d' },
   timeText: { fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 62, textAlign: 'right' },
   timeTextDim: { fontSize: 13, color: '#666', fontVariantNumeric: 'tabular-nums', minWidth: 62 },
   roundBtn: {
@@ -1035,14 +1054,14 @@ const s = {
   toolGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
   toolBtn: (a) => ({
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '14px 0', borderRadius: 12,
-    border: a ? `1px solid ${GREEN}` : '1px solid #1a1b22', backgroundColor: a ? 'rgba(82,250,53,0.08)' : '#0d0e13',
+    border: a ? `1px solid ${GREEN}` : '1px solid #2a2a2d', backgroundColor: a ? 'rgba(82,250,53,0.08)' : '#222224',
     cursor: 'pointer', fontFamily: 'inherit',
   }),
   toolLabel: { fontSize: 11, color: '#ccc', fontWeight: 600 },
   filterGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 10 },
   filterBtn: (a) => ({
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 4, borderRadius: 8, cursor: 'pointer',
-    border: a ? `1px solid ${GREEN}` : '1px solid #1a1b22', backgroundColor: a ? 'rgba(82,250,53,0.08)' : 'transparent', fontFamily: 'inherit',
+    border: a ? `1px solid ${GREEN}` : '1px solid #2a2a2d', backgroundColor: a ? 'rgba(82,250,53,0.08)' : 'transparent', fontFamily: 'inherit',
   }),
   filterThumb: { width: '100%', aspectRatio: '1 / 1', borderRadius: 6, backgroundColor: '#222', backgroundSize: 'cover', backgroundPosition: 'center' },
   filterName: { fontSize: 10, color: '#ccc', fontWeight: 600 },
@@ -1051,14 +1070,14 @@ const s = {
     marginTop: 12, width: '100%', padding: '8px 0', borderRadius: 8, border: '1px solid #2a2b35', backgroundColor: '#15161c',
     color: '#ddd', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
   },
-  toolInfo: { padding: 12, borderRadius: 10, backgroundColor: '#0d0e13', border: '1px solid #1a1b22', fontSize: 13 },
-  shortcuts: { marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #15161c' },
+  toolInfo: { padding: 12, borderRadius: 10, backgroundColor: '#222224', border: '1px solid #2a2a2d', fontSize: 13 },
+  shortcuts: { marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #2a2a2d' },
   sc: { color: '#8a8b95', fontSize: 11.5, margin: '5px 0' },
   kbd: {
     backgroundColor: '#1a1b22', border: '1px solid #2a2b35', borderRadius: 5, padding: '1px 6px', fontSize: 10.5,
     color: '#ddd', marginRight: 6, fontFamily: 'inherit',
   },
-  timeline: { height: 236, flexShrink: 0, display: 'flex', flexDirection: 'column', borderTop: '1px solid #15161c', backgroundColor: '#090a0e' },
+  timeline: { height: 262, flexShrink: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#1b1b1d', borderRadius: 3, margin: 4 },
   tlBar: { height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px' },
   tlTools: { display: 'flex', alignItems: 'center', gap: 6 },
   tlBtn: {
@@ -1073,7 +1092,7 @@ const s = {
   zoom: { display: 'flex', alignItems: 'center', gap: 8 },
   trackScroll: { flex: 1, overflowX: 'auto', overflowY: 'hidden', position: 'relative' },
   trackInner: { position: 'relative', height: '100%' },
-  ruler: { position: 'relative', height: 26, borderBottom: '1px solid #15161c', cursor: 'col-resize' },
+  ruler: { position: 'relative', height: 26, borderBottom: '1px solid #2a2a2d', cursor: 'col-resize' },
   tick: { position: 'absolute', bottom: 0, width: 1, backgroundColor: '#2c2d37' },
   tickLabel: { position: 'absolute', top: -14, left: 4, fontSize: 9.5, color: '#6d6e79', whiteSpace: 'nowrap' },
   videoTrack: { position: 'relative', height: 84, margin: '14px 0 0 0' },
