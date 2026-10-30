@@ -182,7 +182,10 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
       if (at !== null) at += 1;
       makeThumbs(url, duration)
         .then(({ thumbs, step }) => setLibrary((prev) => prev.map((l) => (l.id === id ? { ...l, thumbs, step } : l))))
-        .catch((err) => console.error('[Editor] miniaturas:', err));
+        .catch((err) => {
+          console.error('[Editor] miniaturas:', err);
+          setLibrary((prev) => prev.map((l) => (l.id === id ? { ...l, noThumbs: true } : l)));
+        });
     }
   }
 
@@ -288,7 +291,10 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
       if (!l.duration) return;
       makeThumbs(l.url, l.duration)
         .then(({ thumbs, step }) => setLibrary((prev) => prev.map((x) => (x.id === l.id ? { ...x, thumbs, step } : x))))
-        .catch((err) => console.error('[Editor] miniaturas:', err));
+        .catch((err) => {
+          console.error('[Editor] miniaturas:', err);
+          setLibrary((prev) => prev.map((x) => (x.id === l.id ? { ...x, noThumbs: true } : x)));
+        });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -339,7 +345,12 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     }
   };
 
+  const lastAddRef = useRef({ srcId: null, at: 0 });
   function addToTimeline(entry, index = null) {
+    // Segurança: o mesmo vídeo não entra duas vezes no mesmo instante (clique + soltar)
+    const nowMs = Date.now();
+    if (lastAddRef.current.srcId === entry.id && nowMs - lastAddRef.current.at < 900) return;
+    lastAddRef.current = { srcId: entry.id, at: nowMs };
     const next = clipsRef.current.slice();
     const clip = { id: newId(), srcId: entry.id, in: 0, out: entry.duration };
     if (index === null || index > next.length) next.push(clip);
@@ -479,6 +490,22 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     if (!clips.length) return;
     if (!playing && timeRef.current >= total - 0.05) seek(0, false);
     setPlaying((p) => !p);
+  };
+
+  // Sem permissão (CORS) para ler os quadros: mostra o quadro de cada trecho direto do vídeo
+  const fallbackCells = (c, src) => {
+    const w = c.len * pps;
+    const n = Math.max(1, Math.min(24, Math.ceil(w / 80)));
+    const cw = w / n;
+    return Array.from({ length: n }, (_, i) => (
+      <video
+        key={i}
+        src={`${src.url}#t=${(c.in + ((i + 0.5) * cw) / pps).toFixed(2)}`}
+        preload="metadata"
+        muted
+        style={{ position: 'absolute', top: 0, left: i * cw, width: cw, height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+      />
+    ));
   };
 
   // -------- filtros --------
@@ -656,6 +683,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
                   title="Clique para adicionar de novo, ou arraste para a linha do tempo"
                 >
                   <div style={{ ...s.libThumb, backgroundImage: l.thumbs[0] ? `url(${l.thumbs[0]})` : 'none' }}>
+                    {l.noThumbs && !l.thumbs[0] && <video src={`${l.url}#t=0.5`} preload="metadata" muted style={s.libThumbVideo} />}
                     <span style={s.libDur}>{fmt(l.duration).slice(0, -2)}</span>
                   </div>
                   <span style={s.libName}>{l.name}</span>
@@ -839,6 +867,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
                     onDoubleClick={() => { setPlaying(false); seek(c.start); }}
                   >
                     <div style={s.thumbsLayer}>
+                      {src?.noThumbs && !src.thumbs.length && fallbackCells(c, src)}
                       {src?.thumbs.map((t, i) => (
                         <div
                           key={i}
@@ -925,15 +954,15 @@ const s = {
   },
   ratioGroup: { display: 'flex', gap: 4, padding: 3, backgroundColor: '#111218', borderRadius: 10, border: '1px solid #1c1d25' },
   ratioBtn: (a) => ({
-    border: 'none', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-    backgroundColor: a ? GREEN : 'transparent', color: a ? '#000' : '#999', fontFamily: 'inherit',
+    border: a ? `1px solid ${GREEN}` : '1px solid transparent', borderRadius: 7, padding: '5px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+    backgroundColor: a ? 'rgba(82, 250, 53, 0.05)' : 'transparent', color: a ? GREEN : '#999', fontFamily: 'inherit',
   }),
   exportBtn: {
     justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 8, border: 'none', borderRadius: 10,
     padding: '9px 16px', backgroundColor: '#1a1b22', color: '#666', fontSize: 13, fontWeight: 700,
     cursor: 'not-allowed', fontFamily: 'inherit',
   },
-  exportBtnOn: { backgroundColor: GREEN, color: '#000', cursor: 'pointer' },
+  exportBtnOn: { backgroundColor: 'rgba(82, 250, 53, 0.05)', color: GREEN, border: `1px solid ${GREEN}`, padding: '8px 15px', cursor: 'pointer' },
   overlay: {
     position: 'absolute', inset: 0, zIndex: 20, backgroundColor: 'rgba(3,4,8,0.88)', display: 'flex',
     flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,

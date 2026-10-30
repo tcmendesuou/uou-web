@@ -378,14 +378,14 @@ const styles = {
   payBtn: (busy) => ({
     marginTop: 10,
     width: '100%',
-    border: 'none',
+    border: busy ? '1px solid #1a1a1a' : '1px solid #52fa35',
     borderRadius: 12,
     padding: '13px 0',
     fontSize: 15,
     fontWeight: 800,
     fontFamily: 'inherit',
-    backgroundColor: busy ? '#1a1a1a' : '#52fa35',
-    color: busy ? '#555' : '#000',
+    backgroundColor: busy ? '#1a1a1a' : 'rgba(82, 250, 53, 0.05)',
+    color: busy ? '#555' : '#52fa35',
     cursor: busy ? 'default' : 'pointer',
   }),
   ghostBtn: {
