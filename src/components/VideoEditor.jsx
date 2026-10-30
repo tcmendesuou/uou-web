@@ -1,618 +1,717 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { fetchFile } from '@ffmpeg/util';
-import { getFFmpeg } from '../lib/ffmpeg';
-import { generateThumbnails } from '../lib/videoThumbnails';
-import ClipTimeline from './ClipTimeline';
+// src/components/VideoEditor.jsx
+// Editor de vídeo próprio do UOU. Importa vídeos, corta nas pontas, divide, apaga,
+// reordena, toca a sequência e exporta um MP4 (no navegador, sem servidor).
+// Uso: <VideoEditor initialClips={[{ name, url, file? }]} onClose={...} onExported={(blob) => ...} />
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { exportTimeline } from '../lib/editorExport';
 import {
-  X, Plus, Trash2, Scissors, Film, Play, Pause, ChevronUp, ChevronDown, ListVideo,
+  X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
+  Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
-// ✅ Editor de vídeo v2 — timeline visual estilo CapCut/TikTok: arrasta as
-// alças verdes pra cortar, clica na faixa pra pular o preview pra ali, e dá
-// pra tocar a sequência inteira dos clipes já juntos. O motor por trás
-// continua o ffmpeg.wasm (mesmo de antes) — só a interface mudou.
-export default function VideoEditor({ initialClips, onClose, onExported }) {
-  const [clips, setClips] = useState([]);
-  const [ffmpegReady, setFfmpegReady] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [progressText, setProgressText] = useState('');
-  const [error, setError] = useState('');
+const GREEN = '#52fa35';
+const MIN_CLIP = 0.2; // segundos
+const RATIOS = [
+  { id: '9:16', w: 9, h: 16 },
+  { id: '1:1', w: 1, h: 1 },
+  { id: '16:9', w: 16, h: 9 },
+];
+const TOOLS = [
+  { id: 'texto', label: 'Texto', icon: Type },
+  { id: 'audio', label: 'Áudio', icon: Music2 },
+  { id: 'filtros', label: 'Filtros', icon: Sparkles },
+  { id: 'velocidade', label: 'Velocidade', icon: Gauge },
+  { id: 'legendas', label: 'Legendas', icon: Subtitles },
+  { id: 'transicoes', label: 'Transições', icon: Blend },
+];
 
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [sequenceMode, setSequenceMode] = useState(false);
-  const [playhead, setPlayhead] = useState(0);
+const fmt = (s) => {
+  if (!Number.isFinite(s) || s < 0) s = 0;
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  const cs = Math.floor((s % 1) * 10);
+  return `${m}:${String(sec).padStart(2, '0')}.${cs}`;
+};
 
-  const nextId = useRef(0);
+let idCounter = 1;
+const newId = () => idCounter++;
+
+// Miniaturas de um vídeo: 1 quadro a cada `step` segundos (máx. 60 quadros)
+async function makeThumbs(url, duration) {
+  const count = Math.min(60, Math.max(1, Math.ceil(duration)));
+  const step = duration / count;
+  const video = document.createElement('video');
+  video.muted = true;
+  video.preload = 'auto';
+  if (!url.startsWith('blob:')) video.crossOrigin = 'anonymous';
+  video.src = url;
+  await new Promise((resolve, reject) => { video.onloadeddata = resolve; video.onerror = reject; });
+  const canvas = document.createElement('canvas');
+  const ratio = (video.videoWidth || 16) / (video.videoHeight || 9);
+  canvas.height = 60;
+  canvas.width = Math.round(60 * ratio);
+  const ctx = canvas.getContext('2d');
+  const thumbs = [];
+  for (let i = 0; i < count; i++) {
+    video.currentTime = Math.min(duration - 0.05, i * step + step / 2);
+    await new Promise((resolve) => { video.onseeked = resolve; });
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    thumbs.push(canvas.toDataURL('image/jpeg', 0.55));
+  }
+  return { thumbs, step, ratio };
+}
+
+export default function VideoEditor({ initialClips = [], onClose, onExported }) {
+  const fileRef = useRef(null);
   const videoRef = useRef(null);
-  const loadedUrlRef = useRef(null);
-  const isPlayingRef = useRef(false);
-  const sequenceModeRef = useRef(false);
-  const clipsRef = useRef([]);
-  clipsRef.current = clips;
-  isPlayingRef.current = isPlaying;
-  sequenceModeRef.current = sequenceMode;
+  const trackRef = useRef(null);
 
-  // Carrega o ffmpeg em segundo plano assim que o editor abre
-  useEffect(() => {
-    let cancelled = false;
-    getFFmpeg().then(() => { if (!cancelled) setFfmpegReady(true); }).catch((err) => {
-      console.error('[VideoEditor] Erro ao carregar ffmpeg:', err);
-      if (!cancelled) setError('Não foi possível carregar o editor. Verifique sua conexão e tente de novo.');
+  const [library, setLibrary] = useState([]); // [{id,name,url,duration,thumbs,step}]
+  const [clips, setClips] = useState([]); // [{id, srcId, in, out}]
+  const [past, setPast] = useState([]);
+  const [future, setFuture] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [time, setTime] = useState(0); // posição na linha do tempo (s)
+  const [playing, setPlaying] = useState(false);
+  const [pps, setPps] = useState(70); // pixels por segundo (zoom)
+  const [ratio, setRatio] = useState(RATIOS[0]);
+  const [tool, setTool] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportPct, setExportPct] = useState(0);
+  const [exportError, setExportError] = useState('');
+  const cancelRef = useRef({ cancelled: false });
+
+  const libRef = useRef(library); libRef.current = library;
+  const clipsRef = useRef(clips); clipsRef.current = clips;
+  const timeRef = useRef(0);
+  const playingRef = useRef(false);
+
+  // Início de cada clipe na linha do tempo
+  const layout = useMemo(() => {
+    let acc = 0;
+    return clips.map((c) => {
+      const start = acc;
+      acc += c.out - c.in;
+      return { ...c, start, len: c.out - c.in };
     });
-    return () => { cancelled = true; };
+  }, [clips]);
+  const total = layout.length ? layout[layout.length - 1].start + layout[layout.length - 1].len : 0;
+  const layoutRef = useRef(layout); layoutRef.current = layout;
+  const totalRef = useRef(total); totalRef.current = total;
+
+  const srcOf = (srcId) => libRef.current.find((l) => l.id === srcId);
+
+  // -------- histórico (desfazer / refazer) --------
+  const commit = useCallback((next) => {
+    setPast((p) => [...p.slice(-49), clipsRef.current]);
+    setFuture([]);
+    setClips(next);
   }, []);
-
-  // Monta os clipes iniciais
-  useEffect(() => {
-    (initialClips || []).forEach((clip) => addClip(clip));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const addClip = (clip) => {
-    const id = nextId.current++;
-    const tempVideo = document.createElement('video');
-    tempVideo.src = clip.url;
-    tempVideo.onloadedmetadata = async () => {
-      const duration = tempVideo.duration || 0;
-      const newClip = {
-        id, name: clip.name, url: clip.url, file: clip.file || null,
-        duration, start: 0, end: duration, thumbnails: [],
-      };
-      setClips((prev) => [...prev, newClip]);
-
-      const thumbs = await generateThumbnails(clip.url, duration, 10);
-      setClips((prev) => prev.map((c) => (c.id === id ? { ...c, thumbnails: thumbs } : c)));
-    };
+  const undo = () => {
+    setPast((p) => {
+      if (!p.length) return p;
+      setFuture((f) => [clipsRef.current, ...f]);
+      setClips(p[p.length - 1]);
+      return p.slice(0, -1);
+    });
+  };
+  const redo = () => {
+    setFuture((f) => {
+      if (!f.length) return f;
+      setPast((p) => [...p, clipsRef.current]);
+      setClips(f[0]);
+      return f.slice(1);
+    });
   };
 
-  const handleAddMoreFiles = (e) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach((file) => addClip({ name: file.name, url: URL.createObjectURL(file), file }));
+  // -------- importar vídeos --------
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('video'));
     e.target.value = '';
+    await importItems(files.map((file) => ({ name: file.name, url: URL.createObjectURL(file), file })));
   };
 
-  const removeClip = (id) => {
-    setClips((prev) => prev.filter((c) => c.id !== id));
-  };
+  async function importItems(items) {
+    for (const item of items) {
+      const { url, name, file } = item;
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.src = url;
+      // eslint-disable-next-line no-await-in-loop
+      const duration = await new Promise((resolve) => { v.onloadedmetadata = () => resolve(v.duration || 0); v.onerror = () => resolve(0); });
+      if (!duration) continue;
+      const id = newId();
+      const entry = { id, name, url, file: file || null, duration, thumbs: [], step: duration };
+      setLibrary((prev) => [...prev, entry]);
+      addToTimeline(entry);
+      makeThumbs(url, duration)
+        .then(({ thumbs, step }) => setLibrary((prev) => prev.map((l) => (l.id === id ? { ...l, thumbs, step } : l))))
+        .catch((err) => console.error('[Editor] miniaturas:', err));
+    }
+  }
 
-  const moveClip = (index, direction) => {
-    setClips((prev) => {
-      const next = [...prev];
-      const target = index + direction;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  };
-
-  const updateClipRange = (id, start, end) => {
-    setClips((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c;
-        return {
-          ...c,
-          start: start !== undefined ? start : c.start,
-          end: end !== undefined ? end : c.end,
-        };
-      })
-    );
-  };
-
-  // ✅ Carrega o clipe ativo no player compartilhado sempre que o índice muda
+  // Clipes que já chegam abertos (vindos da página Criar)
+  const startedRef = useRef(false);
   useEffect(() => {
-    const clip = clips[activeIndex];
-    const video = videoRef.current;
-    if (!clip || !video) return;
-
-    const seekAndMaybePlay = () => {
-      video.currentTime = clip.start;
-      setPlayhead(clip.start);
-      if (isPlayingRef.current) video.play().catch(() => {});
-    };
-
-    if (loadedUrlRef.current !== clip.url) {
-      loadedUrlRef.current = clip.url;
-      video.src = clip.url;
-      video.addEventListener('loadedmetadata', seekAndMaybePlay, { once: true });
-    } else {
-      seekAndMaybePlay();
-    }
+    if (startedRef.current) return;
+    startedRef.current = true;
+    if (initialClips.length) importItems(initialClips);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIndex, clips.length]);
+  }, []);
 
-  const handleTimeUpdate = () => {
-    const video = videoRef.current;
-    const clip = clipsRef.current[activeIndex];
-    if (!video || !clip) return;
-    setPlayhead(video.currentTime);
-
-    if (video.currentTime >= clip.end) {
-      if (sequenceModeRef.current && activeIndex < clipsRef.current.length - 1) {
-        setActiveIndex((i) => i + 1);
-      } else if (sequenceModeRef.current) {
-        video.pause();
-        setIsPlaying(false);
-        setSequenceMode(false);
-      } else {
-        // loop dentro do corte atual (preview do clipe sozinho)
-        video.currentTime = clip.start;
-      }
-    }
-  };
-
-  const togglePlayClip = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    setSequenceMode(false);
-    if (isPlaying) {
-      video.pause();
-      setIsPlaying(false);
-    } else {
-      const clip = clips[activeIndex];
-      if (clip && video.currentTime >= clip.end) video.currentTime = clip.start;
-      video.play().catch(() => {});
-      setIsPlaying(true);
-    }
-  };
-
-  const playSequence = () => {
-    if (clips.length === 0) return;
-    setSequenceMode(true);
-    setIsPlaying(true);
-    if (activeIndex !== 0) {
-      setActiveIndex(0);
-    } else {
-      const video = videoRef.current;
-      if (video) {
-        video.currentTime = clips[0].start;
-        video.play().catch(() => {});
-      }
-    }
-  };
-
-  const selectClip = (index) => {
-    const video = videoRef.current;
-    if (video) video.pause();
-    setIsPlaying(false);
-    setSequenceMode(false);
-    setActiveIndex(index);
-  };
-
-  const handleSeekOnClip = (index, time) => {
-    setSequenceMode(false);
-    setIsPlaying(false);
-    const video = videoRef.current;
-    if (index === activeIndex && video) {
-      video.pause();
-      video.currentTime = time;
-      setPlayhead(time);
-    } else {
-      setActiveIndex(index);
-      // o efeito de troca de clipe já ajusta o currentTime pro início;
-      // aplicamos o tempo exato depois que o vídeo carregar
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.currentTime = time;
-          setPlayhead(time);
-        }
-      }, 50);
-    }
-  };
-
-  const formatTime = (secs) => {
-    if (!isFinite(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
+  // -------- exportar --------
   const handleExport = async () => {
-    if (clips.length === 0) {
-      setError('Adicione pelo menos um clipe.');
-      return;
-    }
-    setError('');
+    if (!clips.length || exporting) return;
+    setPlaying(false);
+    setExportError('');
+    setExportPct(0);
     setExporting(true);
-    videoRef.current?.pause();
-    setIsPlaying(false);
-
+    cancelRef.current = { cancelled: false };
     try {
-      const ffmpeg = await getFFmpeg();
-      const trimmedFiles = [];
-
-      for (let i = 0; i < clips.length; i++) {
-        const clip = clips[i];
-        setProgressText(`Processando clipe ${i + 1} de ${clips.length}...`);
-
-        const inputName = `input_${i}.mp4`;
-        const outputName = `trimmed_${i}.mp4`;
-        const data = await fetchFile(clip.file || clip.url);
-        await ffmpeg.writeFile(inputName, data);
-
-        await ffmpeg.exec([
-          '-i', inputName,
-          '-ss', String(clip.start),
-          '-to', String(clip.end),
-          '-c', 'copy',
-          outputName,
-        ]);
-
-        trimmedFiles.push(outputName);
+      const payload = layout.map((c) => {
+        const src = srcOf(c.srcId);
+        return { file: src.file || undefined, url: src.url, in: c.in, out: c.out };
+      });
+      const blob = await exportTimeline(payload, {
+        ratio: ratio.id,
+        onProgress: setExportPct,
+        signal: cancelRef.current,
+      });
+      if (onExported) await onExported(blob);
+      else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'uou-video.mp4';
+        a.click();
       }
-
-      let finalFile = trimmedFiles[0];
-
-      if (trimmedFiles.length > 1) {
-        setProgressText('Juntando os clipes...');
-        const listContent = trimmedFiles.map((f) => `file '${f}'`).join('\n');
-        await ffmpeg.writeFile('list.txt', listContent);
-        await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'output.mp4']);
-        finalFile = 'output.mp4';
-      }
-
-      setProgressText('Finalizando...');
-      const outputData = await ffmpeg.readFile(finalFile);
-      const blob = new Blob([outputData.buffer], { type: 'video/mp4' });
-
-      onExported(blob);
     } catch (err) {
-      console.error('[VideoEditor] Erro ao exportar:', err);
-      setError('Não foi possível exportar o vídeo. Tente com clipes menores ou verifique o formato.');
+      if (err?.message !== 'cancelado') {
+        console.error('[Editor] erro ao exportar:', err);
+        setExportError(err?.message || 'Não foi possível exportar o vídeo.');
+      }
     } finally {
       setExporting(false);
-      setProgressText('');
     }
   };
 
-  const activeClip = clips[activeIndex];
+  function addToTimeline(entry) {
+    commit([...clipsRef.current, { id: newId(), srcId: entry.id, in: 0, out: entry.duration }]);
+  }
+
+  // -------- player: uma única <video> reaproveitada por todos os clipes --------
+  const activeIdxRef = useRef(-1);
+
+  const loadClipAt = useCallback((idx, localTime, thenPlay) => {
+    const video = videoRef.current;
+    const clip = layoutRef.current[idx];
+    if (!video || !clip) return;
+    const src = srcOf(clip.srcId);
+    if (!src) return;
+    activeIdxRef.current = idx;
+    const apply = () => {
+      video.currentTime = localTime;
+      if (thenPlay) video.play().catch(() => {});
+    };
+    if (video.dataset.srcId !== String(clip.srcId)) {
+      video.dataset.srcId = String(clip.srcId);
+      video.src = src.url;
+      video.addEventListener('loadedmetadata', apply, { once: true });
+    } else {
+      apply();
+    }
+  }, []);
+
+  const seek = useCallback((t, keepPlaying = false) => {
+    const lay = layoutRef.current;
+    if (!lay.length) { setTime(0); timeRef.current = 0; return; }
+    const clamped = Math.min(Math.max(0, t), totalRef.current);
+    let idx = lay.findIndex((c) => clamped < c.start + c.len);
+    if (idx === -1) idx = lay.length - 1;
+    const c = lay[idx];
+    const local = Math.min(c.out, c.in + (clamped - c.start));
+    timeRef.current = clamped;
+    setTime(clamped);
+    loadClipAt(idx, local, keepPlaying);
+  }, [loadClipAt]);
+
+  // Quando a lista de clipes muda, mantém o quadro mostrado coerente
+  useEffect(() => {
+    if (!playingRef.current) seek(Math.min(timeRef.current, total), false);
+    if (!clips.length) {
+      const v = videoRef.current;
+      if (v) { v.pause(); v.removeAttribute('src'); delete v.dataset.srcId; v.load(); }
+      activeIdxRef.current = -1;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips]);
+
+  // Laço de reprodução
+  useEffect(() => {
+    playingRef.current = playing;
+    if (!playing) { videoRef.current?.pause(); return undefined; }
+    let raf;
+    const tick = () => {
+      const video = videoRef.current;
+      const lay = layoutRef.current;
+      const idx = activeIdxRef.current;
+      const clip = lay[idx];
+      if (video && clip) {
+        if (video.currentTime >= clip.out - 0.04) {
+          if (idx < lay.length - 1) {
+            const next = lay[idx + 1];
+            timeRef.current = next.start;
+            setTime(next.start);
+            loadClipAt(idx + 1, next.in, true);
+          } else {
+            setPlaying(false);
+            timeRef.current = totalRef.current;
+            setTime(totalRef.current);
+            return;
+          }
+        } else {
+          const t = clip.start + Math.max(0, video.currentTime - clip.in);
+          timeRef.current = t;
+          setTime(t);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    const video = videoRef.current;
+    if (video && video.paused) video.play().catch(() => {});
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, loadClipAt]);
+
+  const togglePlay = () => {
+    if (!clips.length) return;
+    if (!playing && timeRef.current >= total - 0.05) seek(0, false);
+    setPlaying((p) => !p);
+  };
+
+  // -------- edição --------
+  const splitAtPlayhead = () => {
+    const t = timeRef.current;
+    const idx = layout.findIndex((c) => t > c.start + MIN_CLIP && t < c.start + c.len - MIN_CLIP);
+    if (idx === -1) return;
+    const c = layout[idx];
+    const cut = c.in + (t - c.start);
+    const a = { id: newId(), srcId: c.srcId, in: c.in, out: cut };
+    const b = { id: newId(), srcId: c.srcId, in: cut, out: c.out };
+    const next = clips.slice();
+    next.splice(idx, 1, a, b);
+    commit(next);
+    setSelected(b.id);
+  };
+
+  const deleteSelected = () => {
+    if (selected == null) return;
+    commit(clips.filter((c) => c.id !== selected));
+    setSelected(null);
+  };
+
+  const moveSelected = (dir) => {
+    const idx = clips.findIndex((c) => c.id === selected);
+    const target = idx + dir;
+    if (idx === -1 || target < 0 || target >= clips.length) return;
+    const next = clips.slice();
+    [next[idx], next[target]] = [next[target], next[idx]];
+    commit(next);
+  };
+
+  // Arrastar as alças de corte
+  const trimDrag = (e, clipId, side) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const base = clipsRef.current;
+    const original = base.find((c) => c.id === clipId);
+    const src = srcOf(original.srcId);
+    const before = base;
+    let latest = base;
+    const move = (ev) => {
+      const dt = (ev.clientX - startX) / pps;
+      latest = base.map((c) => {
+        if (c.id !== clipId) return c;
+        if (side === 'left') return { ...c, in: Math.min(c.out - MIN_CLIP, Math.max(0, original.in + dt)) };
+        return { ...c, out: Math.max(c.in + MIN_CLIP, Math.min(src.duration, original.out + dt)) };
+      });
+      setClips(latest);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setPast((p) => [...p.slice(-49), before]);
+      setFuture([]);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  // Clicar/arrastar na régua move a agulha
+  const scrubFrom = (e) => {
+    const rect = trackRef.current.getBoundingClientRect();
+    const toTime = (clientX) => (clientX - rect.left + trackRef.current.scrollLeft) / pps;
+    setPlaying(false);
+    seek(toTime(e.clientX));
+    const move = (ev) => seek(toTime(ev.clientX));
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  // Atalhos
+  useEffect(() => {
+    const onKey = (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+      else if (e.key === 's' || e.key === 'S') splitAtPlayhead();
+      else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  useEffect(() => () => libRef.current.forEach((l) => URL.revokeObjectURL(l.url)), []);
+
+  const timelineWidth = Math.max(total * pps + 240, 800);
+  const ticks = [];
+  for (let s = 0; s <= Math.ceil(timelineWidth / pps); s++) ticks.push(s);
+  const previewBox = ratio.w >= ratio.h
+    ? { width: 'min(100%, 560px)', aspectRatio: `${ratio.w} / ${ratio.h}` }
+    : { height: '100%', aspectRatio: `${ratio.w} / ${ratio.h}`, maxWidth: '100%' };
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.panel}>
-        <div style={styles.header}>
-          <div style={styles.headerTitleRow}>
-            <Scissors size={20} color="#52fa35" />
-            <h2 style={styles.title}>Editor de Vídeo</h2>
-          </div>
-          <button style={styles.closeBtn} onClick={onClose} aria-label="Fechar editor">
-            <X size={22} color="#fff" />
+    <div style={s.root}>
+      <input ref={fileRef} type="file" accept="video/*" multiple onChange={handleFiles} style={{ display: 'none' }} />
+
+      {/* Barra superior */}
+      <div style={s.topBar}>
+        <div style={s.topLeft}>
+          <button type="button" style={s.iconBtn} onClick={onClose} aria-label="Fechar"><X size={18} /></button>
+          <Film size={18} color={GREEN} />
+          <span style={s.projectName}>Projeto sem título</span>
+          <span style={s.betaTag}>beta</span>
+        </div>
+        <div style={s.ratioGroup}>
+          {RATIOS.map((r) => (
+            <button key={r.id} type="button" style={s.ratioBtn(ratio.id === r.id)} onClick={() => setRatio(r)}>{r.id}</button>
+          ))}
+        </div>
+        <button
+          type="button"
+          style={{ ...s.exportBtn, ...(clips.length && !exporting ? s.exportBtnOn : {}) }}
+          disabled={!clips.length || exporting}
+          onClick={handleExport}
+        >
+          <Download size={16} /> {onExported ? 'Exportar e salvar em Prontos' : 'Exportar'}
+        </button>
+      </div>
+
+      {/* Área principal */}
+      <div style={s.main}>
+        {/* Mídia */}
+        <aside style={s.panel}>
+          <p style={s.panelTitle}>Mídia</p>
+          <button type="button" style={s.importBtn} onClick={() => fileRef.current?.click()}>
+            <Plus size={18} /> Importar vídeos
           </button>
+          <div style={s.libList}>
+            {library.length === 0 && <p style={s.hint}>Importe um ou mais vídeos para começar.</p>}
+            {library.map((l) => (
+              <button key={l.id} type="button" style={s.libItem} onClick={() => addToTimeline(l)} title="Adicionar à linha do tempo">
+                <div style={{ ...s.libThumb, backgroundImage: l.thumbs[0] ? `url(${l.thumbs[0]})` : 'none' }}>
+                  <span style={s.libDur}>{fmt(l.duration).slice(0, -2)}</span>
+                </div>
+                <span style={s.libName}>{l.name}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        {/* Prévia */}
+        <section style={s.center}>
+          <div style={s.stage}>
+            <div style={{ ...s.screen, ...previewBox }}>
+              <video ref={videoRef} style={s.video} playsInline />
+              {clips.length === 0 && (
+                <div style={s.emptyScreen}>
+                  <Film size={34} color="#333" />
+                  <p style={s.hint}>Sua prévia aparece aqui</p>
+                </div>
+              )}
+            </div>
+          </div>
+          <div style={s.transport}>
+            <span style={s.timeText}>{fmt(time)}</span>
+            <button type="button" style={s.roundBtn} onClick={() => { setPlaying(false); seek(0); }} aria-label="Voltar ao início"><SkipBack size={16} /></button>
+            <button type="button" style={s.playBtn} onClick={togglePlay} aria-label={playing ? 'Pausar' : 'Tocar'}>
+              {playing ? <Pause size={20} fill="#000" /> : <Play size={20} fill="#000" />}
+            </button>
+            <span style={s.timeTextDim}>{fmt(total)}</span>
+          </div>
+        </section>
+
+        {/* Ferramentas */}
+        <aside style={s.panel}>
+          <p style={s.panelTitle}>Ferramentas</p>
+          <div style={s.toolGrid}>
+            {TOOLS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button key={t.id} type="button" style={s.toolBtn(tool === t.id)} onClick={() => setTool(tool === t.id ? null : t.id)}>
+                  <Icon size={20} color="#fff" />
+                  <span style={s.toolLabel}>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {tool && (
+            <div style={s.toolInfo}>
+              <b>{TOOLS.find((t) => t.id === tool).label}</b>
+              <p style={s.hint}>Entra nas próximas etapas do editor.</p>
+            </div>
+          )}
+          <div style={s.shortcuts}>
+            <p style={s.panelTitle}>Atalhos</p>
+            <p style={s.sc}><kbd style={s.kbd}>Espaço</kbd> tocar / pausar</p>
+            <p style={s.sc}><kbd style={s.kbd}>S</kbd> dividir na agulha</p>
+            <p style={s.sc}><kbd style={s.kbd}>Del</kbd> apagar clipe</p>
+            <p style={s.sc}><kbd style={s.kbd}>Ctrl+Z</kbd> desfazer</p>
+          </div>
+        </aside>
+      </div>
+
+      {/* Linha do tempo */}
+      <div style={s.timeline}>
+        <div style={s.tlBar}>
+          <div style={s.tlTools}>
+            <button type="button" style={s.tlBtn} onClick={undo} disabled={!past.length} title="Desfazer"><Undo2 size={16} /></button>
+            <button type="button" style={s.tlBtn} onClick={redo} disabled={!future.length} title="Refazer"><Redo2 size={16} /></button>
+            <span style={s.sep} />
+            <button type="button" style={s.tlBtnText} onClick={splitAtPlayhead} disabled={!clips.length}><Scissors size={15} /> Dividir</button>
+            <button type="button" style={s.tlBtnText} onClick={deleteSelected} disabled={selected == null}><Trash2 size={15} /> Apagar</button>
+            <button type="button" style={s.tlBtn} onClick={() => moveSelected(-1)} disabled={selected == null} title="Mover para trás"><ChevronLeft size={16} /></button>
+            <button type="button" style={s.tlBtn} onClick={() => moveSelected(1)} disabled={selected == null} title="Mover para frente"><ChevronRight size={16} /></button>
+          </div>
+          <div style={s.zoom}>
+            <ZoomOut size={15} color="#888" />
+            <input type="range" min={20} max={200} value={pps} onChange={(e) => setPps(Number(e.target.value))} style={{ accentColor: GREEN }} />
+            <ZoomIn size={15} color="#888" />
+          </div>
         </div>
 
-        {!ffmpegReady && !error && (
-          <div style={styles.loadingBox}>
-            <div style={styles.spinner} />
-            <p style={styles.loadingText}>Carregando o editor...</p>
-          </div>
-        )}
-
-        {error && <p style={styles.errorText}>{error}</p>}
-
-        {ffmpegReady && (
-          <>
-            {/* Preview compartilhado */}
-            <div style={styles.previewWrap}>
-              <video
-                ref={videoRef}
-                style={styles.previewVideo}
-                onTimeUpdate={handleTimeUpdate}
-                playsInline
-              />
-              {!activeClip && <div style={styles.previewEmpty}>Adicione um vídeo pra começar</div>}
-            </div>
-
-            {activeClip && (
-              <div style={styles.transportRow}>
-                <button style={styles.transportBtn} onClick={togglePlayClip} aria-label={isPlaying ? 'Pausar' : 'Tocar'}>
-                  {isPlaying && !sequenceMode ? <Pause size={16} /> : <Play size={16} />}
-                </button>
-                <span style={styles.transportTime}>
-                  {formatTime(playhead)} / clipe {activeIndex + 1} de {clips.length}
-                </span>
-                <button style={styles.sequenceBtn} onClick={playSequence}>
-                  <ListVideo size={15} /> {sequenceMode && isPlaying ? 'Tocando sequência...' : 'Tocar sequência completa'}
-                </button>
-              </div>
-            )}
-
-            {/* Lista de clipes com timeline visual */}
-            <div style={styles.clipsList}>
-              {clips.length === 0 && (
-                <p style={styles.emptyText}>Nenhum clipe ainda. Adicione um vídeo pra começar.</p>
-              )}
-              {clips.map((clip, index) => (
-                <div
-                  key={clip.id}
-                  style={{ ...styles.clipRow, ...(index === activeIndex ? styles.clipRowActive : {}) }}
-                  onClick={() => selectClip(index)}
-                >
-                  <div style={styles.clipHeader}>
-                    <span style={styles.clipName}>
-                      {index + 1}. {clip.name}
-                    </span>
-                    <span style={styles.clipDuration}>
-                      {formatTime(clip.end - clip.start)} selecionado (de {formatTime(clip.duration)})
-                    </span>
-                  </div>
-
-                  <ClipTimeline
-                    clip={clip}
-                    playheadTime={index === activeIndex ? playhead : null}
-                    onChangeRange={(start, end) => updateClipRange(clip.id, start, end)}
-                    onSeek={(time) => handleSeekOnClip(index, time)}
-                  />
-
-                  <div style={styles.clipActions} onClick={(e) => e.stopPropagation()}>
-                    <button style={styles.smallIconBtn} onClick={() => moveClip(index, -1)} disabled={index === 0}>
-                      <ChevronUp size={14} color={index === 0 ? '#444' : '#f0f0f0'} />
-                    </button>
-                    <button style={styles.smallIconBtn} onClick={() => moveClip(index, 1)} disabled={index === clips.length - 1}>
-                      <ChevronDown size={14} color={index === clips.length - 1 ? '#444' : '#f0f0f0'} />
-                    </button>
-                    <button style={styles.smallIconBtn} onClick={() => removeClip(clip.id)}>
-                      <Trash2 size={14} color="#ff4444" />
-                    </button>
-                  </div>
+        <div ref={trackRef} style={s.trackScroll}>
+          <div style={{ ...s.trackInner, width: timelineWidth }}>
+            {/* Régua */}
+            <div style={s.ruler} onPointerDown={scrubFrom}>
+              {ticks.map((sec) => (
+                <div key={sec} style={{ ...s.tick, left: sec * pps, height: sec % 5 === 0 ? 12 : 6 }}>
+                  {sec % 5 === 0 && <span style={s.tickLabel}>{fmt(sec).slice(0, -2)}</span>}
                 </div>
               ))}
             </div>
 
-            <label style={styles.addClipBtn}>
-              <Plus size={18} color="#f0f0f0" />
-              <span>Adicionar mais um clipe</span>
-              <input type="file" accept="video/*" multiple onChange={handleAddMoreFiles} style={styles.hiddenInput} />
-            </label>
+            {/* Faixa de vídeo */}
+            <div style={s.videoTrack} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); scrubFrom(e); } }}>
+              {layout.map((c) => {
+                const src = srcOf(c.srcId);
+                return (
+                  <div
+                    key={c.id}
+                    style={{ ...s.clip, left: c.start * pps, width: c.len * pps, ...(selected === c.id ? s.clipSelected : {}) }}
+                    onPointerDown={(e) => { e.stopPropagation(); setSelected(c.id); }}
+                    onDoubleClick={() => { setPlaying(false); seek(c.start); }}
+                  >
+                    <div style={s.thumbsLayer}>
+                      {src?.thumbs.map((t, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            ...s.thumbCell,
+                            left: (i * src.step - c.in) * pps,
+                            width: src.step * pps,
+                            backgroundImage: `url(${t})`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <span style={s.clipLabel}>{src?.name}</span>
+                    {selected === c.id && (
+                      <>
+                        <div style={{ ...s.handle, left: 0 }} onPointerDown={(e) => trimDrag(e, c.id, 'left')}><span style={s.grip} /></div>
+                        <div style={{ ...s.handle, right: 0 }} onPointerDown={(e) => trimDrag(e, c.id, 'right')}><span style={s.grip} /></div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+              {clips.length === 0 && <p style={{ ...s.hint, padding: '26px 16px' }}>Os clipes que você importar aparecem aqui. Arraste as alças verdes para cortar.</p>}
+            </div>
 
-            <button
-              style={styles.exportBtn(clips.length > 0 && !exporting)}
-              onClick={handleExport}
-              disabled={clips.length === 0 || exporting}
-            >
-              <Film size={18} />
-              {exporting ? (progressText || 'Exportando...') : 'Exportar e salvar em Prontos'}
-            </button>
-          </>
-        )}
+            {/* Agulha */}
+            <div style={{ ...s.playhead, left: time * pps }}>
+              <span style={s.playheadTop} />
+            </div>
+          </div>
+        </div>
       </div>
+
+      {exporting && (
+        <div style={s.overlay}>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Exportando seu vídeo...</p>
+          <div style={s.barTrack}><div style={{ ...s.barFill, width: `${Math.round(exportPct * 100)}%` }} /></div>
+          <p style={s.hint}>{Math.round(exportPct * 100)}% — não feche esta janela</p>
+          <button type="button" style={s.cancelBtn} onClick={() => { cancelRef.current.cancelled = true; }}>Cancelar</button>
+        </div>
+      )}
+      {exportError && !exporting && (
+        <div style={s.overlay}>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Não foi possível exportar</p>
+          <p style={{ ...s.hint, maxWidth: 360, textAlign: 'center' }}>{exportError}</p>
+          <button type="button" style={s.cancelBtn} onClick={() => setExportError('')}>Fechar</button>
+        </div>
+      )}
     </div>
   );
 }
 
-const styles = {
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(1,2,8,0.92)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2000,
+const s = {
+  root: {
+    position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', flexDirection: 'column',
+    backgroundColor: '#07080c', color: '#f0f0f0',
     fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
   },
-  panel: {
-    width: 640,
-    maxWidth: '94vw',
-    maxHeight: '90vh',
-    overflowY: 'auto',
-    backgroundColor: '#0d0d0d',
-    border: '1px solid #1a1a1a',
-    borderRadius: 16,
-    padding: 24,
+  topBar: {
+    height: 54, flexShrink: 0, display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center',
+    padding: '0 16px', borderBottom: '1px solid #15161c',
   },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+  topLeft: { display: 'flex', alignItems: 'center', gap: 10 },
+  iconBtn: {
+    width: 34, height: 34, borderRadius: '50%', border: '1px solid #23242c', backgroundColor: '#111218',
+    color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
   },
-  headerTitleRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
+  projectName: { fontSize: 14, fontWeight: 600 },
+  betaTag: {
+    fontSize: 10, fontWeight: 700, color: GREEN, border: `1px solid ${GREEN}`, borderRadius: 999, padding: '2px 8px',
   },
-  title: {
-    color: '#f0f0f0',
-    fontSize: 18,
-    fontWeight: 700,
-    margin: 0,
-  },
-  closeBtn: {
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    display: 'flex',
-  },
-  loadingBox: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 14,
-    padding: '40px 0',
-  },
-  spinner: {
-    width: 32,
-    height: 32,
-    border: '3px solid #1a1a1a',
-    borderTopColor: '#52fa35',
-    borderRadius: '50%',
-    animation: 'spin 0.8s linear infinite',
-  },
-  loadingText: {
-    color: '#999',
-    fontSize: 13,
-  },
-  errorText: {
-    color: '#ff4444',
-    fontSize: 13,
-    marginBottom: 14,
-  },
-  previewWrap: {
-    position: 'relative',
-    width: '100%',
-    maxWidth: 220,
-    aspectRatio: '9 / 16',
-    margin: '0 auto 12px',
-    backgroundColor: '#000',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  previewVideo: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain',
-    backgroundColor: '#000',
-  },
-  previewEmpty: {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#555',
-    fontSize: 11,
-    textAlign: 'center',
-    padding: 10,
-  },
-  transportRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    marginBottom: 20,
-    flexWrap: 'wrap',
-  },
-  transportBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: '50%',
-    border: 'none',
-    backgroundColor: '#52fa35',
-    color: '#000',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  },
-  transportTime: {
-    color: '#999',
-    fontSize: 12,
-  },
-  sequenceBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    borderRadius: 20,
-    padding: '6px 14px',
-    color: '#f0f0f0',
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-  },
-  clipsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    marginBottom: 16,
-  },
-  emptyText: {
-    color: '#666',
-    fontSize: 13,
-    textAlign: 'center',
-    padding: '20px 0',
-  },
-  clipRow: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 10,
-    border: '1px solid transparent',
-    cursor: 'pointer',
-  },
-  clipRowActive: {
-    border: '1px solid #52fa35',
-  },
-  clipHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 8,
-    gap: 8,
-  },
-  clipName: {
-    color: '#f0f0f0',
-    fontSize: 12,
-    fontWeight: 600,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    flex: 1,
-  },
-  clipDuration: {
-    color: '#52fa35',
-    fontSize: 11,
-    fontWeight: 600,
-    flexShrink: 0,
-  },
-  clipActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: 4,
-    marginTop: 8,
-  },
-  smallIconBtn: {
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    padding: 4,
-    display: 'flex',
-  },
-  addClipBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#1a1a1a',
-    border: '1px dashed #333',
-    borderRadius: 10,
-    padding: '12px 0',
-    color: '#f0f0f0',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    position: 'relative',
-    marginBottom: 16,
-  },
-  hiddenInput: {
-    position: 'absolute',
-    inset: 0,
-    opacity: 0,
-    cursor: 'pointer',
-  },
-  exportBtn: (enabled) => ({
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: enabled ? '#52fa35' : '#1a1a1a',
-    color: enabled ? '#000' : '#555',
-    border: 'none',
-    borderRadius: 10,
-    padding: '13px 0',
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: enabled ? 'pointer' : 'default',
+  ratioGroup: { display: 'flex', gap: 4, padding: 3, backgroundColor: '#111218', borderRadius: 10, border: '1px solid #1c1d25' },
+  ratioBtn: (a) => ({
+    border: 'none', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+    backgroundColor: a ? GREEN : 'transparent', color: a ? '#000' : '#999', fontFamily: 'inherit',
   }),
+  exportBtn: {
+    justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 8, border: 'none', borderRadius: 10,
+    padding: '9px 16px', backgroundColor: '#1a1b22', color: '#666', fontSize: 13, fontWeight: 700,
+    cursor: 'not-allowed', fontFamily: 'inherit',
+  },
+  exportBtnOn: { backgroundColor: GREEN, color: '#000', cursor: 'pointer' },
+  overlay: {
+    position: 'absolute', inset: 0, zIndex: 20, backgroundColor: 'rgba(3,4,8,0.88)', display: 'flex',
+    flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,
+  },
+  barTrack: { width: 320, height: 8, borderRadius: 4, backgroundColor: '#1a1b22', overflow: 'hidden' },
+  barFill: { height: '100%', backgroundColor: GREEN, transition: 'width 0.2s' },
+  cancelBtn: {
+    border: '1px solid #2a2b35', backgroundColor: 'transparent', color: '#ccc', borderRadius: 10, padding: '8px 18px',
+    cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
+  },
+  main: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '240px minmax(0, 1fr) 240px', gridTemplateRows: 'minmax(0, 1fr)' },
+  panel: { minHeight: 0, padding: 14, borderRight: '1px solid #15161c', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 },
+  panelTitle: { margin: '0 0 2px 0', fontSize: 12, fontWeight: 700, color: '#8a8b95', letterSpacing: 0.4, textTransform: 'uppercase' },
+  importBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', borderRadius: 12,
+    border: '1px dashed #34353f', backgroundColor: '#101117', color: '#fff', fontSize: 13, fontWeight: 600,
+    cursor: 'pointer', fontFamily: 'inherit',
+  },
+  libList: { display: 'flex', flexDirection: 'column', gap: 8 },
+  libItem: {
+    display: 'flex', alignItems: 'center', gap: 10, padding: 6, borderRadius: 10, border: '1px solid #1a1b22',
+    backgroundColor: '#0d0e13', cursor: 'pointer', textAlign: 'left', color: 'inherit', fontFamily: 'inherit',
+  },
+  libThumb: {
+    position: 'relative', width: 64, height: 42, borderRadius: 7, backgroundColor: '#1a1b22',
+    backgroundSize: 'cover', backgroundPosition: 'center', flexShrink: 0,
+  },
+  libDur: {
+    position: 'absolute', right: 3, bottom: 3, fontSize: 9, fontWeight: 700, backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 4, padding: '1px 4px',
+  },
+  libName: { fontSize: 12, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  hint: { color: '#666', fontSize: 12, margin: 0, lineHeight: 1.5 },
+  center: { display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden', borderRight: '1px solid #15161c' },
+  stage: { flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden' },
+  screen: {
+    position: 'relative', backgroundColor: '#000', borderRadius: 10, overflow: 'hidden', maxHeight: '100%',
+    border: '1px solid #1c1d25', boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+  },
+  video: { width: '100%', height: '100%', objectFit: 'contain', display: 'block', backgroundColor: '#000' },
+  emptyScreen: {
+    position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', gap: 8,
+  },
+  transport: { height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, borderTop: '1px solid #15161c' },
+  timeText: { fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 62, textAlign: 'right' },
+  timeTextDim: { fontSize: 13, color: '#666', fontVariantNumeric: 'tabular-nums', minWidth: 62 },
+  roundBtn: {
+    width: 34, height: 34, borderRadius: '50%', border: '1px solid #23242c', backgroundColor: '#111218', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+  },
+  playBtn: {
+    width: 44, height: 44, borderRadius: '50%', border: 'none', backgroundColor: GREEN, color: '#000',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+  },
+  toolGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
+  toolBtn: (a) => ({
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '14px 0', borderRadius: 12,
+    border: a ? `1px solid ${GREEN}` : '1px solid #1a1b22', backgroundColor: a ? 'rgba(82,250,53,0.08)' : '#0d0e13',
+    cursor: 'pointer', fontFamily: 'inherit',
+  }),
+  toolLabel: { fontSize: 11, color: '#ccc', fontWeight: 600 },
+  toolInfo: { padding: 12, borderRadius: 10, backgroundColor: '#0d0e13', border: '1px solid #1a1b22', fontSize: 13 },
+  shortcuts: { marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #15161c' },
+  sc: { color: '#8a8b95', fontSize: 11.5, margin: '5px 0' },
+  kbd: {
+    backgroundColor: '#1a1b22', border: '1px solid #2a2b35', borderRadius: 5, padding: '1px 6px', fontSize: 10.5,
+    color: '#ddd', marginRight: 6, fontFamily: 'inherit',
+  },
+  timeline: { height: 236, flexShrink: 0, display: 'flex', flexDirection: 'column', borderTop: '1px solid #15161c', backgroundColor: '#090a0e' },
+  tlBar: { height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px' },
+  tlTools: { display: 'flex', alignItems: 'center', gap: 6 },
+  tlBtn: {
+    width: 32, height: 32, borderRadius: 8, border: 'none', backgroundColor: 'transparent', color: '#ddd',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+  },
+  tlBtnText: {
+    display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: 'none',
+    backgroundColor: '#14151b', color: '#ddd', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+  },
+  sep: { width: 1, height: 20, backgroundColor: '#23242c', margin: '0 4px' },
+  zoom: { display: 'flex', alignItems: 'center', gap: 8 },
+  trackScroll: { flex: 1, overflowX: 'auto', overflowY: 'hidden', position: 'relative' },
+  trackInner: { position: 'relative', height: '100%' },
+  ruler: { position: 'relative', height: 26, borderBottom: '1px solid #15161c', cursor: 'col-resize' },
+  tick: { position: 'absolute', bottom: 0, width: 1, backgroundColor: '#2c2d37' },
+  tickLabel: { position: 'absolute', top: -14, left: 4, fontSize: 9.5, color: '#6d6e79', whiteSpace: 'nowrap' },
+  videoTrack: { position: 'relative', height: 84, margin: '14px 0 0 0' },
+  clip: {
+    position: 'absolute', top: 0, height: 72, borderRadius: 8, overflow: 'hidden', backgroundColor: '#1a1b22',
+    border: '1px solid #2c2d37', cursor: 'pointer', boxSizing: 'border-box',
+  },
+  clipSelected: { border: `2px solid ${GREEN}` },
+  thumbsLayer: { position: 'absolute', inset: 0 },
+  thumbCell: { position: 'absolute', top: 0, bottom: 0, backgroundSize: 'cover', backgroundPosition: 'center' },
+  clipLabel: {
+    position: 'absolute', left: 8, top: 4, fontSize: 10, fontWeight: 700, color: '#fff', textShadow: '0 1px 3px #000',
+    maxWidth: 'calc(100% - 16px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none',
+  },
+  handle: {
+    position: 'absolute', top: 0, bottom: 0, width: 14, backgroundColor: GREEN, cursor: 'ew-resize',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none',
+  },
+  grip: { width: 2, height: 22, borderRadius: 1, backgroundColor: '#000' },
+  playhead: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#fff', pointerEvents: 'none', zIndex: 5 },
+  playheadTop: {
+    position: 'absolute', top: 0, left: -5, width: 12, height: 12, backgroundColor: '#fff', borderRadius: '3px 3px 6px 6px',
+  },
 };
-
-if (typeof document !== 'undefined' && !document.getElementById('uou-spin-keyframes')) {
-  const styleTag = document.createElement('style');
-  styleTag.id = 'uou-spin-keyframes';
-  styleTag.innerHTML = '@keyframes spin { to { transform: rotate(360deg); } }';
-  document.head.appendChild(styleTag);
-}
