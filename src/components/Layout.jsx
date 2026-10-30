@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
+import logoUou from '../assets/logo-uou.png';
 import {
   Home, Radio, Bell, User, LogOut,
   LayoutDashboard, PlusCircle, Film, Wallet, MessageCircle,
@@ -113,7 +114,7 @@ export default function Layout() {
         <header style={styles.header}>
           <div style={styles.headerSide} />
 
-          <h1 style={styles.headerLogo}>UOU</h1>
+          <h1 style={styles.headerLogo}><img src={logoUou} alt="UOU" style={styles.headerLogoImg} /></h1>
 
           {/* ✅ Toggle Usuário / Criador de Conteúdo */}
           <div style={{ ...styles.headerSide, ...styles.toggleWrap }}>
@@ -245,7 +246,10 @@ const styles = {
     margin: 0,
     letterSpacing: '2px',
     justifySelf: 'center',
+    display: 'flex',
+    alignItems: 'center',
   },
+  headerLogoImg: { height: '26px', width: 'auto', display: 'block' },
   toggleWrap: {
     justifyContent: 'flex-end',
     gap: '10px',
