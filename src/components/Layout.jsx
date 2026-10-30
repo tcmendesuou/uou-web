@@ -18,8 +18,8 @@ const USER_MENU = [
 // ✅ Abas do modo Criador de Conteúdo (trocam quando o toggle é ativado)
 const CREATOR_MENU = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
-  { path: '/postar', icon: PlusCircle, label: 'Postar' },
-  { path: '/criar', icon: Film, label: 'Criar' },
+  { path: '/postar', icon: PlusCircle, label: 'Criar' },
+  { path: '/criar', icon: Film, label: 'Editar' },
   { path: '/carteira', icon: Wallet, label: 'Carteira' },
 ];
 
