@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import Highlights from '../components/Highlights';
 import FeedTopBar from '../components/FeedTopBar';
 import PostFeed from '../components/PostFeed';
+import Dashboard from './Dashboard';
 
 export default function Home() {
   const { isCreator } = useOutletContext();
@@ -10,14 +11,7 @@ export default function Home() {
   const [searchText, setSearchText] = useState('');
 
   if (isCreator) {
-    return (
-      <div>
-        <h1 style={styles.title}>Dashboard</h1>
-        <p style={styles.subtitle}>
-          Aqui vamos mostrar o resumo de lives, posts e desempenho do criador.
-        </p>
-      </div>
-    );
+    return <Dashboard />;
   }
 
   return (
