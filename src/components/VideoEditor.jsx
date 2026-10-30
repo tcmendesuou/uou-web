@@ -86,6 +86,7 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
   const cancelRef = useRef({ cancelled: false });
 
   const libRef = useRef(library); libRef.current = library;
+  const cloudRef = useRef([]); cloudRef.current = cloud;
   const clipsRef = useRef(clips); clipsRef.current = clips;
   const timeRef = useRef(0);
   const playingRef = useRef(false);
@@ -135,9 +136,17 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
     await importItems(files.map((file) => ({ name: file.name, url: URL.createObjectURL(file), file })));
   };
 
-  async function importItems(items) {
+  async function importItems(items, insertAt = null) {
+    let at = insertAt;
     for (const item of items) {
       const { url, name, file } = item;
+      // Mesmo vídeo da nuvem já está no projeto: só reaproveita (não duplica a cópia)
+      const existing = !file && libRef.current.find((l) => !l.file && l.url === url);
+      if (existing) {
+        addToTimeline(existing, at);
+        if (at !== null) at += 1;
+        continue;
+      }
       const v = document.createElement('video');
       v.preload = 'metadata';
       v.src = url;
@@ -146,8 +155,10 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
       if (!duration) continue;
       const id = newId();
       const entry = { id, name, url, file: file || null, duration, thumbs: [], step: duration };
+      libRef.current = [...libRef.current, entry];
       setLibrary((prev) => [...prev, entry]);
-      addToTimeline(entry);
+      addToTimeline(entry, at);
+      if (at !== null) at += 1;
       makeThumbs(url, duration)
         .then(({ thumbs, step }) => setLibrary((prev) => prev.map((l) => (l.id === id ? { ...l, thumbs, step } : l))))
         .catch((err) => console.error('[Editor] miniaturas:', err));
@@ -217,9 +228,57 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
     }
   };
 
-  function addToTimeline(entry) {
-    commit([...clipsRef.current, { id: newId(), srcId: entry.id, in: 0, out: entry.duration }]);
+  function addToTimeline(entry, index = null) {
+    const next = clipsRef.current.slice();
+    const clip = { id: newId(), srcId: entry.id, in: 0, out: entry.duration };
+    if (index === null || index > next.length) next.push(clip);
+    else next.splice(index, 0, clip);
+    clipsRef.current = next;
+    commit(next);
   }
+
+  // -------- arrastar da biblioteca (ou do computador) para a linha do tempo --------
+  const [dropAt, setDropAt] = useState(null); // posição (s) do indicador verde
+  const insertIndexAt = (t) => {
+    let idx = 0;
+    layoutRef.current.forEach((c, i) => { if (t > c.start + c.len / 2) idx = i + 1; });
+    return idx;
+  };
+  const timeFromEvent = (e) => {
+    const rect = trackRef.current.getBoundingClientRect();
+    return Math.max(0, (e.clientX - rect.left + trackRef.current.scrollLeft) / pps);
+  };
+  const onTrackDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const t = timeFromEvent(e);
+    const idx = insertIndexAt(t);
+    const lay = layoutRef.current;
+    setDropAt(idx >= lay.length ? totalRef.current : lay[idx].start);
+  };
+  const onTrackDrop = async (e) => {
+    e.preventDefault();
+    setDropAt(null);
+    const index = insertIndexAt(timeFromEvent(e));
+    const raw = e.dataTransfer.getData('application/x-uou-video');
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data.kind === 'cloud') {
+        const v = cloudRef.current.find((c) => c.id === data.id);
+        if (v) await importItems([{ name: v.originalName || 'Vídeo', url: v.url }], index);
+      } else if (data.kind === 'lib') {
+        const entry = libRef.current.find((l) => l.id === data.id);
+        if (entry) addToTimeline(entry, index);
+      }
+      return;
+    }
+    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('video'));
+    if (files.length) await importItems(files.map((file) => ({ name: file.name, url: URL.createObjectURL(file), file })), index);
+  };
+  const startDrag = (e, payload) => {
+    e.dataTransfer.setData('application/x-uou-video', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'copy';
+  };
 
   // -------- player: uma única <video> reaproveitada por todos os clipes --------
   const activeIdxRef = useRef(-1);
@@ -433,56 +492,75 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
 
       {/* Área principal */}
       <div style={s.main}>
-        {/* Mídia: Brutos e Prontos (da nuvem) + vídeos do computador */}
-        <aside style={s.panel}>
-          <div style={s.mediaTabs}>
-            {[
-              { id: 'brutos', label: 'Brutos', icon: Video },
-              { id: 'prontos', label: 'Prontos', icon: CheckCircle2 },
-              { id: 'computador', label: 'Computador', icon: MonitorUp },
-            ].map(({ id, label, icon: Icon }) => (
-              <button key={id} type="button" style={s.mediaTab(mediaTab === id)} onClick={() => setMediaTab(id)}>
-                <Icon size={12} /> {label}
-              </button>
-            ))}
+        {/* Painel esquerdo: parte de cima = vídeos do projeto; parte de baixo = biblioteca */}
+        <aside style={s.sidePanel}>
+          <div style={s.sideTop}>
+            <p style={s.panelTitle}>Projeto</p>
+            <div style={s.libList}>
+              {library.length === 0 && (
+                <p style={s.hint}>Os vídeos usados nesta edição aparecem aqui. Arraste um vídeo da biblioteca para a linha do tempo.</p>
+              )}
+              {library.map((l) => (
+                <div
+                  key={l.id}
+                  draggable
+                  onDragStart={(e) => startDrag(e, { kind: 'lib', id: l.id })}
+                  style={s.libItem}
+                  onClick={() => addToTimeline(l)}
+                  title="Clique para adicionar de novo, ou arraste para a linha do tempo"
+                >
+                  <div style={{ ...s.libThumb, backgroundImage: l.thumbs[0] ? `url(${l.thumbs[0]})` : 'none' }}>
+                    <span style={s.libDur}>{fmt(l.duration).slice(0, -2)}</span>
+                  </div>
+                  <span style={s.libName}>{l.name}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {mediaTab === 'computador' && (
-            <>
-              <button type="button" style={s.importBtn} onClick={() => fileRef.current?.click()}>
-                <Plus size={18} /> Importar vídeos
-              </button>
-              <div style={s.libList}>
-                {library.length === 0 && <p style={s.hint}>Os vídeos que você importar ou adicionar aparecem aqui.</p>}
-                {library.map((l) => (
-                  <button key={l.id} type="button" style={s.libItem} onClick={() => addToTimeline(l)} title="Adicionar à linha do tempo">
-                    <div style={{ ...s.libThumb, backgroundImage: l.thumbs[0] ? `url(${l.thumbs[0]})` : 'none' }}>
-                      <span style={s.libDur}>{fmt(l.duration).slice(0, -2)}</span>
-                    </div>
-                    <span style={s.libName}>{l.name}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {mediaTab !== 'computador' && (
-            <div style={s.libList}>
-              {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).length === 0 && (
-                <p style={s.hint}>
-                  {mediaTab === 'brutos'
-                    ? 'Nenhum vídeo bruto salvo ainda. Suas gravações do app aparecem aqui.'
-                    : 'Nenhum vídeo pronto ainda. Exporte um vídeo e ele aparece aqui.'}
-                </p>
-              )}
-              {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).map((v) => (
-                <button key={v.id} type="button" style={s.libItem} onClick={() => addCloud(v)} title="Adicionar à linha do tempo">
-                  <video src={`${v.url}#t=0.5`} preload="metadata" muted style={s.libThumbVideo} />
-                  <span style={s.libName}>{v.originalName || 'Vídeo'}</span>
+          <div style={s.sideBottom}>
+            <p style={s.panelTitle}>Biblioteca</p>
+            <div style={s.mediaTabs}>
+              {[
+                { id: 'brutos', label: 'Brutos', icon: Video },
+                { id: 'prontos', label: 'Prontos', icon: CheckCircle2 },
+                { id: 'computador', label: 'Computador', icon: MonitorUp },
+              ].map(({ id, label, icon: Icon }) => (
+                <button key={id} type="button" style={s.mediaTab(mediaTab === id)} onClick={() => setMediaTab(id)}>
+                  <Icon size={12} /> {label}
                 </button>
               ))}
             </div>
-          )}
+
+            {mediaTab === 'computador' ? (
+              <button type="button" style={s.importBtn} onClick={() => fileRef.current?.click()}>
+                <Plus size={18} /> Importar vídeos
+              </button>
+            ) : (
+              <div style={s.libList}>
+                {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).length === 0 && (
+                  <p style={s.hint}>
+                    {mediaTab === 'brutos'
+                      ? 'Nenhum vídeo bruto salvo ainda. Suas gravações do app aparecem aqui.'
+                      : 'Nenhum vídeo pronto ainda. Exporte um vídeo e ele aparece aqui.'}
+                  </p>
+                )}
+                {cloud.filter((v) => v.status === (mediaTab === 'brutos' ? 'raw' : 'ready')).map((v) => (
+                  <div
+                    key={v.id}
+                    draggable
+                    onDragStart={(e) => startDrag(e, { kind: 'cloud', id: v.id })}
+                    style={s.libItem}
+                    onClick={() => addCloud(v)}
+                    title="Clique ou arraste para a linha do tempo"
+                  >
+                    <video src={`${v.url}#t=0.5`} preload="metadata" muted style={s.libThumbVideo} />
+                    <span style={s.libName}>{v.originalName || 'Vídeo'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </aside>
 
         {/* Prévia */}
@@ -557,7 +635,7 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
           </div>
         </div>
 
-        <div ref={trackRef} style={s.trackScroll}>
+        <div ref={trackRef} style={s.trackScroll} onDragOver={onTrackDragOver} onDragLeave={() => setDropAt(null)} onDrop={onTrackDrop}>
           <div style={{ ...s.trackInner, width: timelineWidth }}>
             {/* Régua */}
             <div style={s.ruler} onPointerDown={scrubFrom}>
@@ -604,6 +682,8 @@ export default function VideoEditor({ initialClips = [], onClose, onExported }) 
               })}
               {clips.length === 0 && <p style={{ ...s.hint, padding: '26px 16px' }}>Os clipes que você importar aparecem aqui. Arraste as alças verdes para cortar.</p>}
             </div>
+
+            {dropAt !== null && <div style={{ ...s.dropLine, left: dropAt * pps }} />}
 
             {/* Agulha */}
             <div style={{ ...s.playhead, left: time * pps }}>
@@ -687,6 +767,13 @@ const s = {
     backgroundColor: a ? 'rgba(82,250,53,0.14)' : 'transparent', color: a ? GREEN : '#8a8b95',
   }),
   libThumbVideo: { width: 64, height: 42, borderRadius: 7, backgroundColor: '#1a1b22', objectFit: 'cover', flexShrink: 0 },
+  sidePanel: { minHeight: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid #15161c', overflow: 'hidden' },
+  sideTop: { flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 },
+  sideBottom: {
+    flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
+    borderTop: '1px solid #23242c', backgroundColor: '#0a0b10',
+  },
+  dropLine: { position: 'absolute', top: 26, bottom: 0, width: 3, marginLeft: -1, backgroundColor: GREEN, zIndex: 6, pointerEvents: 'none' },
   libList: { display: 'flex', flexDirection: 'column', gap: 8 },
   libItem: {
     display: 'flex', alignItems: 'center', gap: 10, padding: 6, borderRadius: 10, border: '1px solid #1a1b22',
