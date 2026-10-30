@@ -6,10 +6,29 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useBackgroundFilters } from '@stream-io/video-react-sdk';
 import { Sparkles, ImagePlus } from 'lucide-react';
+import { BACKGROUND_SCENES, renderScene } from '../lib/liveBackgrounds';
 
 const GREEN = '#52fa35';
 
-// Fundos prontos, gerados na hora (sem arquivos extras)
+// Fundos do UOU: é só colocar as imagens (jpg, png ou webp) na pasta
+// src/assets/fundos-live/ e fazer o deploy — elas aparecem aqui sozinhas.
+// A ordem segue o nome do arquivo (01-praia.jpg, 02-estudio.jpg...) e o nome
+// mostrado vem do arquivo sem o número e sem a extensão.
+const FUNDOS_UOU = Object.entries(
+  import.meta.glob('../assets/fundos-live/*.{jpg,jpeg,png,webp,JPG,JPEG,PNG,WEBP}', {
+    eager: true,
+    query: '?url',
+    import: 'default',
+  })
+)
+  .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+  .map(([path, url]) => {
+    const file = path.split('/').pop().replace(/\.[^.]+$/, '');
+    const label = file.replace(/^\d+[\s._-]*/, '').replace(/[-_]+/g, ' ').trim() || file;
+    return { id: `fundo-${file}`, label: label.charAt(0).toUpperCase() + label.slice(1), url };
+  });
+
+// Cores/degradês simples
 const PRESETS = [
   { id: 'uou', label: 'UOU', stops: ['#010208', '#0b3d12', '#52fa35'] },
   { id: 'noite', label: 'Noite', stops: ['#0f0c29', '#302b63', '#24243e'] },
@@ -44,6 +63,19 @@ export default function BackgroundEffects() {
     () => Object.fromEntries(PRESETS.map((p) => [p.id, makeGradient(p.stops)])),
     []
   );
+  // Miniaturas dos ambientes (leves) e agrupamento por tema
+  const sceneThumbs = useMemo(
+    () => Object.fromEntries(BACKGROUND_SCENES.map((sc) => [sc.id, renderScene(sc.id, 180)])),
+    []
+  );
+  const groups = useMemo(() => {
+    const map = new Map();
+    BACKGROUND_SCENES.forEach((sc) => {
+      if (!map.has(sc.group)) map.set(sc.group, []);
+      map.get(sc.group).push(sc);
+    });
+    return Array.from(map.entries());
+  }, []);
 
   useEffect(() => () => {
     if (customRef.current) URL.revokeObjectURL(customRef.current);
@@ -97,6 +129,53 @@ export default function BackgroundEffects() {
         </Chip>
       </div>
 
+      {groups.map(([group, scenes]) => (
+        <div key={group}>
+          <p style={styles.groupTitle}>{group}</p>
+          <div style={styles.row}>
+            {scenes.map((sc) => (
+              <button
+                key={sc.id}
+                type="button"
+                title={sc.label}
+                onClick={() => choose(sc.id, () => applyBackgroundImageFilter(renderScene(sc.id)))}
+                style={{
+                  ...styles.swatch,
+                  backgroundImage: `url(${sceneThumbs[sc.id]})`,
+                  outline: active === sc.id ? `2px solid ${GREEN}` : '2px solid transparent',
+                }}
+              >
+                <span style={styles.swatchLabel}>{sc.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {FUNDOS_UOU.length > 0 && (
+        <div>
+          <p style={styles.groupTitle}>Fundos UOU</p>
+          <div style={styles.row}>
+            {FUNDOS_UOU.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                title={f.label}
+                onClick={() => choose(f.id, () => applyBackgroundImageFilter(f.url))}
+                style={{
+                  ...styles.swatch,
+                  backgroundImage: `url(${f.url})`,
+                  outline: active === f.id ? `2px solid ${GREEN}` : '2px solid transparent',
+                }}
+              >
+                <span style={styles.swatchLabel}>{f.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p style={styles.groupTitle}>Cores e imagem sua</p>
       <div style={styles.row}>
         {PRESETS.map((p) => (
           <button
@@ -158,6 +237,7 @@ const styles = {
   head: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 },
   title: { color: '#f0f0f0', fontSize: 14, fontWeight: 700 },
   loading: { color: '#888', fontSize: 12 },
+  groupTitle: { color: '#888', fontSize: 12, fontWeight: 600, margin: '4px 0 8px 0' },
   row: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   chip: (active) => ({
     padding: '8px 14px',
@@ -172,8 +252,8 @@ const styles = {
   }),
   swatch: {
     position: 'relative',
-    width: 92,
-    height: 56,
+    width: 110,
+    height: 62,
     borderRadius: 10,
     border: 'none',
     backgroundSize: 'cover',
@@ -193,8 +273,8 @@ const styles = {
   },
   upload: {
     position: 'relative',
-    width: 92,
-    height: 56,
+    width: 110,
+    height: 62,
     borderRadius: 10,
     border: '1px dashed #3a3a3a',
     backgroundColor: '#1a1a1a',

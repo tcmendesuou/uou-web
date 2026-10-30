@@ -1,0 +1,10 @@
+FUNDOS DA LIVE
+Coloque aqui as imagens (jpg, png ou webp). Elas aparecem sozinhas em "Fundos UOU"
+na tela de transmissão depois do próximo deploy (git push).
+
+Dicas:
+- Tamanho ideal: 1280x720 ou 1920x1080 (16:9), com no máximo ~500 KB cada.
+- A ordem segue o nome do arquivo: 01-..., 02-..., 03-...
+- O nome que aparece no botão vem do nome do arquivo, sem o número e sem a extensão.
+  Ex.: 01-praia-ao-entardecer.jpg  ->  "Praia ao entardecer"
+- Para tirar um fundo, apague o arquivo da pasta.
