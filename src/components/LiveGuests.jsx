@@ -173,6 +173,7 @@ export function GuestViewerBar({ liveId }) {
   const uid = auth.currentUser?.uid;
   const [inv, setInv] = useState(null);
   const startedRef = useRef(false);
+  const [err, setErr] = useState('');
 
   useEffect(() => {
     if (!uid || !liveId) return undefined;
@@ -197,15 +198,19 @@ export function GuestViewerBar({ liveId }) {
   }, [onStage, canVideo, call]);
 
   const answer = async (next) => {
+    setErr('');
+    let step = 'convite';
     try {
       await updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status: next });
+      step = 'palco da live';
       if (next === 'onstage') {
         await updateDoc(doc(db, 'lives', liveId), { guestUids: arrayUnion(uid), guestHistory: arrayUnion(uid) });
       } else if (next === 'left') {
         await updateDoc(doc(db, 'lives', liveId), { guestUids: arrayRemove(uid) });
       }
     } catch (e) {
-      console.error('[guest] responder convite:', e);
+      console.error(`[guest] responder convite (${step}):`, e);
+      setErr(`Não foi possível entrar (${step}): ${e?.code || e?.message || 'erro'}`);
     }
   };
 
@@ -213,6 +218,7 @@ export function GuestViewerBar({ liveId }) {
     return (
       <div style={g.banner}>
         <p style={g.bannerText}><b>{inv.hostName || 'O criador'}</b> convidou você para participar da live.</p>
+        {err && <p style={{ ...g.bannerText, color: '#ff6b6b', width: '100%' }}>{err}</p>}
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" style={g.accept} onClick={() => answer('onstage')}>Aceitar</button>
           <button type="button" style={g.refuse} onClick={() => answer('declined')}>Agora não</button>
@@ -224,6 +230,7 @@ export function GuestViewerBar({ liveId }) {
     return (
       <div style={g.controls}>
         <span style={g.badge}>Você está no palco</span>
+        {err && <span style={{ color: '#ff6b6b', fontSize: 11 }}>{err}</span>}
         <button type="button" style={g.round(!micOn)} onClick={() => call.microphone.toggle().catch(() => {})} title="Microfone">{micOn ? <Mic size={18} /> : <MicOff size={18} />}</button>
         <button type="button" style={g.round(!camOn)} onClick={() => call.camera.toggle().catch(() => {})} title="Câmera">{camOn ? <Video size={18} /> : <VideoOff size={18} />}</button>
         <button type="button" style={g.leave} onClick={() => answer('left')}><LogOut size={15} /> Sair do palco</button>
