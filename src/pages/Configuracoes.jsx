@@ -235,8 +235,9 @@ const s = {
   h3: { margin: 0, fontSize: 15, fontWeight: 800, letterSpacing: 0.5 },
   muted: { color: '#8a8a95', fontSize: 13, margin: '2px 0 0' },
   btn: {
-    display: 'flex', alignItems: 'center', gap: 6, background: '#52fa35', color: '#010208', border: 'none',
-    borderRadius: 10, padding: '9px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(82, 250, 53, 0.05)', color: '#52fa35',
+    border: '1px solid #52fa35', borderRadius: 10, padding: '9px 14px', fontWeight: 700, fontSize: 13,
+    cursor: 'pointer', fontFamily: 'inherit',
   },
   btnDisabled: {
     background: '#16161d', color: '#666', border: '1px solid #26262e', borderRadius: 10,
@@ -268,7 +269,8 @@ const s = {
   privacy: { color: '#8a8a95', fontSize: 12, marginTop: 12 },
   err: { color: '#ff6b6b', fontSize: 13, marginTop: 10 },
   send: {
-    marginTop: 14, width: '100%', background: '#52fa35', color: '#010208', border: 'none', borderRadius: 10,
+    marginTop: 14, width: '100%', background: 'rgba(82, 250, 53, 0.05)', color: '#52fa35',
+    border: '1px solid #52fa35', borderRadius: 10,
     padding: 12, fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
   },
 };
