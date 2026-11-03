@@ -1,9 +1,11 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Landing from './pages/Landing';
 import Home from './pages/Home';
 const Notificacoes = lazy(() => import('./pages/Notificacoes'));
 const Chat = lazy(() => import('./pages/Chat'));
@@ -20,7 +22,23 @@ export default function App() {
   const [user, setUser] = useState(undefined); // undefined = carregando, null = deslogado
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    // Só entra quem já tem cadastro (conta criada no App): se o login criar uma conta nova
+    // sem documento em `users` (ex.: Entrar com Google), a pessoa é desconectada.
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (!u) { setUser(null); return; }
+      try {
+        const snap = await getDoc(doc(db, 'users', u.uid));
+        if (!snap.exists()) {
+          await signOut(auth);
+          window.alert('Não encontramos um cadastro do UOU para essa conta. O cadastro é feito pelo aplicativo UOU.');
+          setUser(null);
+          return;
+        }
+      } catch (err) {
+        console.warn('[App] não foi possível checar o cadastro:', err?.message);
+      }
+      setUser(u);
+    });
     return unsubscribe;
   }, []);
 
@@ -37,7 +55,7 @@ export default function App() {
       <Suspense fallback={<div style={styles.loading}><p>Carregando...</p></div>}>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-        <Route path="/" element={user ? <Layout /> : <Navigate to="/login" replace />}>
+        <Route path="/" element={user ? <Layout /> : <Landing />}>
           <Route index element={<Home />} />
 
           {/* Modo Usuário */}
@@ -56,7 +74,7 @@ export default function App() {
           <Route path="perfil" element={<Perfil />} />
           <Route path="chat" element={<Chat />} />
         </Route>
-        <Route path="*" element={<Navigate to={user ? '/' : '/login'} replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
     </BrowserRouter>
