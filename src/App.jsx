@@ -16,6 +16,8 @@ const Postar = lazy(() => import('./pages/Postar'));
 const Lives = lazy(() => import('./pages/Lives'));
 const LiveViewer = lazy(() => import('./pages/LiveViewer'));
 const LiveHost = lazy(() => import('./pages/LiveHost'));
+const Configuracoes = lazy(() => import('./pages/Configuracoes'));
+const Empresa = lazy(() => import('./pages/Empresa'));
 const EditorTeste = lazy(() => import('./pages/EditorTeste'));
 
 export default function App() {
@@ -73,6 +75,8 @@ export default function App() {
           {/* Modo Usuário */}
           <Route path="perfil" element={<Perfil />} />
           <Route path="chat" element={<Chat />} />
+          <Route path="configuracoes" element={<Configuracoes />} />
+          <Route path="empresa" element={<Empresa />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

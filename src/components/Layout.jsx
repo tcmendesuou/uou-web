@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import logoUou from '../assets/logo-uou.png';
+import CompanySwitcher from './CompanySwitcher';
+import { useMyCompanies, getActiveCompanyId, setActiveCompanyId } from '../lib/companies';
 import {
   Home, Radio, Bell, User, LogOut,
-  LayoutDashboard, PlusCircle, Film, Wallet, MessageCircle,
+  LayoutDashboard, PlusCircle, Film, Wallet, MessageCircle, Building2,
 } from 'lucide-react';
 
 // ✅ Abas do modo Usuário comum
@@ -22,6 +24,11 @@ const CREATOR_MENU = [
   { path: '/postar', icon: PlusCircle, label: 'Criar' },
   { path: '/criar', icon: Film, label: 'Editar' },
   { path: '/carteira', icon: Wallet, label: 'Carteira' },
+];
+
+// ✅ Menu quando está dentro do perfil de uma empresa (as abas serão definidas depois)
+const COMPANY_MENU = [
+  { path: '/empresa', icon: Building2, label: 'Empresa', end: true },
 ];
 
 const SIDEBAR_COLLAPSED = 84;
@@ -41,7 +48,32 @@ export default function Layout() {
     }
   });
 
-  const menuItems = isCreator ? CREATOR_MENU : USER_MENU;
+  // ✅ Perfil de empresa: troca estilo Nubank (ícone no header). Empresa ativa fica salva no navegador.
+  const uid = auth.currentUser?.uid;
+  const companies = useMyCompanies(uid);
+  const [activeId, setActiveId] = useState(() => getActiveCompanyId());
+  const activeCompany = companies?.find((c) => c.id === activeId) || null;
+
+  // Se a empresa salva não existe mais (ou o usuário saiu dela), volta ao perfil pessoal.
+  useEffect(() => {
+    if (activeId && companies && !companies.some((c) => c.id === activeId)) {
+      setActiveCompanyId(null);
+      setActiveId(null);
+    }
+  }, [activeId, companies]);
+
+  const enterCompany = (c) => {
+    setActiveCompanyId(c.id);
+    setActiveId(c.id);
+    navigate('/empresa');
+  };
+  const leaveCompany = () => {
+    setActiveCompanyId(null);
+    setActiveId(null);
+    navigate('/perfil');
+  };
+
+  const menuItems = activeCompany ? COMPANY_MENU : (isCreator ? CREATOR_MENU : USER_MENU);
 
   const toggleRole = () => {
     setIsCreator((prev) => {
@@ -118,6 +150,14 @@ export default function Layout() {
 
           {/* ✅ Toggle Usuário / Criador de Conteúdo */}
           <div style={{ ...styles.headerSide, ...styles.toggleWrap }}>
+            <CompanySwitcher
+              uid={uid}
+              companies={companies || []}
+              activeCompany={activeCompany}
+              onEnter={enterCompany}
+              onLeave={leaveCompany}
+            />
+            {!activeCompany && (<>
             <span style={{ ...styles.toggleLabel, ...(!isCreator ? styles.toggleLabelActive : {}) }}>
               Usuário
             </span>
@@ -132,11 +172,12 @@ export default function Layout() {
             <span style={{ ...styles.toggleLabel, ...(isCreator ? styles.toggleLabelActive : {}) }}>
               Criador
             </span>
+            </>)}
           </div>
         </header>
 
         <main style={styles.main}>
-          <Outlet context={{ isCreator }} />
+          <Outlet context={{ isCreator, company: activeCompany }} />
         </main>
       </div>
 

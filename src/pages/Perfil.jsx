@@ -9,7 +9,7 @@ import {
 import { db, auth, storage } from '../firebase';
 import {
   Camera, Settings, X, Heart, MessageCircle, Trash2, Key, LogOut, Play,
-  Eye, EyeOff, Lock,
+  Eye, EyeOff, Lock, Building2, BadgeCheck,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -405,6 +405,19 @@ export default function Perfil() {
                 <span>Alterar Senha</span>
               </button>
             )}
+
+            <button
+              style={styles.changePasswordButton}
+              onClick={() => { setEditModalOpen(false); navigate('/configuracoes'); }}
+            >
+              <Building2 size={18} color="#fff" />
+              <span>Empresas</span>
+            </button>
+
+            <button style={{ ...styles.changePasswordButton, opacity: 0.5, cursor: 'default' }} disabled>
+              <BadgeCheck size={18} color="#fff" />
+              <span>Transformar em perfil profissional (em breve)</span>
+            </button>
 
             <button style={styles.logoutButton} onClick={handleLogout}>
               <LogOut size={18} color="#ff4444" />
