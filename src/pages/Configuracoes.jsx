@@ -48,7 +48,7 @@ export default function Configuracoes() {
     if (!files.cnpjCard) return setError('Anexe o Cartão CNPJ.');
     if (!files.idDoc) return setError('Anexe um documento com foto (RG ou CNH).');
     if (form.relation === 'authorized' && !files.authLetter) return setError('Anexe a carta de autorização da empresa.');
-    if (requests.some((r) => r.cnpj === cnpj && (r.status === 'pending' || r.status === 'needs_docs'))) {
+    if (requests.some((r) => r.cnpj === cnpj && r.status === 'pending')) {
       return setError('Você já tem um pedido em análise para esse CNPJ.');
     }
     if (companies?.some((c) => c.cnpj === cnpj)) return setError('Você já participa dessa empresa.');
