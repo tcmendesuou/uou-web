@@ -21,6 +21,7 @@ const Empresa = lazy(() => import('./pages/Empresa'));
 const EmpresaConfig = lazy(() => import('./pages/EmpresaConfig'));
 const Equipe = lazy(() => import('./pages/Equipe'));
 const EmpresaEmBreve = lazy(() => import('./pages/EmpresaEmBreve'));
+const PostPublico = lazy(() => import('./pages/PostPublico'));
 const EditorTeste = lazy(() => import('./pages/EditorTeste'));
 
 export default function App() {
@@ -84,6 +85,7 @@ export default function App() {
           <Route path="empresa/equipe" element={<Equipe />} />
           <Route path="empresa/:tab" element={<EmpresaEmBreve />} />
         </Route>
+        <Route path="/p/:postId" element={<PostPublico />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>

@@ -4,6 +4,8 @@ import {
   collection, query, orderBy, limit, onSnapshot, getDocs, where, doc, getDoc,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { usePostLike, postLink } from '../lib/postActions';
+import CommentsPanel from './CommentsPanel';
 import {
   Heart, MessageCircle, Send, Lock, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Radio, Users, CalendarClock,
 } from 'lucide-react';
@@ -352,6 +354,16 @@ function PostCard({ post, onWheel, following }) {
   const photoSrc = thumb || url;
   const videoRef = useRef(null);
   const [paused, setPaused] = useState(false);
+  const { liked, count: likeCount, toggle: toggleLike } = usePostLike(post);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyLink = async () => {
+    const link = postLink(post.id);
+    try { await navigator.clipboard.writeText(link); }
+    catch { window.prompt('Copie o link do post:', link); return; }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
   // Post exclusivo para assinantes: a web ainda não tem assinatura, então só o dono vê
   const locked = !!post.exclusive && post.userId !== auth.currentUser?.uid;
   const many = !locked && medias.length > 1;
@@ -419,16 +431,17 @@ function PostCard({ post, onWheel, following }) {
 
       {/* Ações — lado direito */}
       <div style={styles.actions}>
-        <div style={styles.actionButton}>
-          <Heart size={32} color="#fff" />
-          <span style={styles.actionText}>{post.likes || 0}</span>
+        <div style={styles.actionButton} onClick={toggleLike} role="button" aria-label="Curtir">
+          <Heart size={32} color={liked ? '#FF4444' : '#fff'} fill={liked ? '#FF4444' : 'none'} />
+          <span style={styles.actionText}>{likeCount}</span>
         </div>
-        <div style={styles.actionButton}>
+        <div style={styles.actionButton} onClick={() => setCommentsOpen(true)} role="button" aria-label="Comentários">
           <MessageCircle size={28} color="#fff" />
           <span style={styles.actionText}>{post.commentsCount || 0}</span>
         </div>
-        <div style={styles.actionButton}>
+        <div style={{ ...styles.actionButton, position: 'relative' }} onClick={copyLink} role="button" aria-label="Copiar link">
           <Send size={28} color="#fff" />
+          {copied && <span style={styles.copiedTip}>Link copiado!</span>}
         </div>
         <img
           src="/donor-button.png"
@@ -442,6 +455,7 @@ function PostCard({ post, onWheel, following }) {
       <div style={styles.bottomInfo}>
         {!locked && post.caption && <p style={styles.caption}>{post.caption}</p>}
       </div>
+      {commentsOpen && <CommentsPanel post={post} onClose={() => setCommentsOpen(false)} />}
     </div>
   );
 }
@@ -755,6 +769,11 @@ const styles = {
     alignItems: 'center',
     gap: '4px',
     cursor: 'pointer',
+  },
+  copiedTip: {
+    position: 'absolute', right: '48px', top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap',
+    background: 'rgba(0,0,0,0.85)', border: '1px solid #52fa35', color: '#52fa35',
+    borderRadius: '8px', padding: '4px 10px', fontSize: '12px', fontWeight: '600',
   },
   actionText: {
     color: '#fff',
