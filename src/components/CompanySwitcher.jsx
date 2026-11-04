@@ -52,7 +52,7 @@ export default function CompanySwitcher({ uid, companies, activeCompany, onEnter
                   </div>
                   <div style={s.rowText}>
                     <strong style={s.rowName}>{c.tradeName || c.legalName}</strong>
-                    <span style={s.rowRole}>{COMPANY_ROLES[c.members?.[uid]] || 'Membro'}</span>
+                    <span style={s.rowRole}>{COMPANY_ROLES[c.members?.[uid]] || 'Membro'}{c.status === 'suspended' ? ' · Suspensa' : ''}</span>
                   </div>
                   <ChevronRight size={18} color="#666" />
                 </button>

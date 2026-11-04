@@ -8,6 +8,7 @@ import { useMyCompanies, getActiveCompanyId, setActiveCompanyId } from '../lib/c
 import {
   Home, Radio, Bell, User, LogOut,
   LayoutDashboard, PlusCircle, Film, Wallet, MessageCircle, Building2,
+  Eye, Handshake, Megaphone, Clapperboard, Store, Users, Settings,
 } from 'lucide-react';
 
 // ✅ Abas do modo Usuário comum
@@ -28,7 +29,15 @@ const CREATOR_MENU = [
 
 // ✅ Menu quando está dentro do perfil de uma empresa (as abas serão definidas depois)
 const COMPANY_MENU = [
-  { path: '/empresa', icon: Building2, label: 'Empresa', end: true },
+  { path: '/empresa', icon: Eye, label: 'Perfil', end: true },
+  { path: '/empresa/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/empresa/parceiros', icon: Handshake, label: 'Parceiros' },
+  { path: '/empresa/marketing', icon: Megaphone, label: 'Marketing' },
+  { path: '/empresa/posts', icon: Clapperboard, label: 'Posts' },
+  { path: '/empresa/loja', icon: Store, label: 'Loja' },
+  { path: '/empresa/financeiro', icon: Wallet, label: 'Financeiro' },
+  { path: '/empresa/equipe', icon: Users, label: 'Equipe' },
+  { path: '/empresa/configuracoes', icon: Settings, label: 'Configurações' },
 ];
 
 const SIDEBAR_COLLAPSED = 84;
@@ -120,6 +129,7 @@ export default function Layout() {
                 ...styles.navItem,
                 ...(hovered ? styles.navItemExpanded : styles.navItemCollapsed),
                 ...(isActive ? styles.navItemActive : {}),
+                ...(activeCompany ? { padding: hovered ? '10px 28px' : '10px 0' } : {}),
               })}
             >
               <item.icon size={26} style={{ flexShrink: 0 }} />
@@ -177,7 +187,18 @@ export default function Layout() {
         </header>
 
         <main style={styles.main}>
-          <Outlet context={{ isCreator, company: activeCompany }} />
+          {activeCompany?.status === 'suspended' ? (
+            <div style={{ maxWidth: 520, margin: '60px auto', textAlign: 'center', color: '#f0f0f0' }}>
+              <h2 style={{ margin: '0 0 8px' }}>Empresa suspensa</h2>
+              <p style={{ color: '#8a8a95', fontSize: 14 }}>
+                O perfil de "{activeCompany.tradeName || activeCompany.legalName}" foi suspenso pela equipe do UOU.
+                {activeCompany.suspendedReason ? ` Motivo: ${activeCompany.suspendedReason}` : ''}
+              </p>
+              <p style={{ color: '#8a8a95', fontSize: 13 }}>Use o botão "Perfil pessoal" no topo para voltar.</p>
+            </div>
+          ) : (
+            <Outlet context={{ isCreator, company: activeCompany }} />
+          )}
         </main>
       </div>
 

@@ -18,6 +18,8 @@ const LiveViewer = lazy(() => import('./pages/LiveViewer'));
 const LiveHost = lazy(() => import('./pages/LiveHost'));
 const Configuracoes = lazy(() => import('./pages/Configuracoes'));
 const Empresa = lazy(() => import('./pages/Empresa'));
+const EmpresaConfig = lazy(() => import('./pages/EmpresaConfig'));
+const EmpresaEmBreve = lazy(() => import('./pages/EmpresaEmBreve'));
 const EditorTeste = lazy(() => import('./pages/EditorTeste'));
 
 export default function App() {
@@ -77,6 +79,8 @@ export default function App() {
           <Route path="chat" element={<Chat />} />
           <Route path="configuracoes" element={<Configuracoes />} />
           <Route path="empresa" element={<Empresa />} />
+          <Route path="empresa/configuracoes" element={<EmpresaConfig />} />
+          <Route path="empresa/:tab" element={<EmpresaEmBreve />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

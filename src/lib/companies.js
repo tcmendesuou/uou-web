@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 // ── Cargos da empresa (o que cada um pode fazer será definido depois) ──
@@ -10,6 +10,24 @@ export const COMPANY_ROLES = {
   production: 'Produção',
   finance: 'Financeiro',
 };
+
+// Quem pode editar o perfil da empresa (o que cada cargo faz no resto será definido depois)
+export const canEditCompany = (company, uid) =>
+  !!company && company.status !== 'suspended' && ['owner', 'admin'].includes(company.members?.[uid]);
+
+export const isSuspended = (company) => company?.status === 'suspended';
+
+// Registro interno de atividades da empresa (quem fez o quê e quando)
+export async function logCompanyActivity(companyId, uid, type, extra = {}) {
+  try {
+    const id = (crypto?.randomUUID?.() || `${Date.now()}${Math.random().toString(36).slice(2)}`).replace(/-/g, '');
+    await setDoc(doc(db, 'company_activity', id), {
+      companyId, uid, type, at: new Date().toISOString(), ...extra,
+    });
+  } catch (e) {
+    console.warn('[companies] não foi possível registrar a atividade:', e?.code || e?.message);
+  }
+}
 
 export const REQUEST_STATUS = {
   pending: { label: 'Em análise', color: '#f5c542' },
