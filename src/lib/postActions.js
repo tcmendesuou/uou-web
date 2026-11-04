@@ -39,19 +39,22 @@ export function usePostLike(post) {
     setBusy(true);
     const likeRef = doc(db, 'likes', `${uid}_${post.id}`);
     const postRef = doc(db, 'posts', post.id);
+    // Atualiza a tela UMA vez, com valor fixo (o feed também atualiza o contador sozinho
+    // quando o Firestore grava; somar de novo aqui contava em dobro).
+    const next = Math.max(0, count + (liked ? -1 : 1));
     try {
       if (liked) {
+        setLiked(false);
+        setCount(next);
         await deleteDoc(likeRef);
         await updateDoc(postRef, { likes: increment(-1) });
-        setLiked(false);
-        setCount((c) => Math.max(0, c - 1));
       } else {
+        setLiked(true);
+        setCount(next);
         await setDoc(likeRef, {
           userId: uid, postId: post.id, postOwnerId: post.userId, createdAt: new Date().toISOString(),
         });
         await updateDoc(postRef, { likes: increment(1) });
-        setLiked(true);
-        setCount((c) => c + 1);
         if (post.userId !== uid) {
           const u = await myProfile(uid);
           await addDoc(collection(db, 'notifications'), {
@@ -69,10 +72,12 @@ export function usePostLike(post) {
       }
     } catch (e) {
       console.error('Erro ao curtir:', e);
+      setLiked(liked);
+      setCount(count);
     } finally {
       setBusy(false);
     }
-  }, [uid, post, liked, busy]);
+  }, [uid, post, liked, count, busy]);
 
   return { liked, count, toggle };
 }
