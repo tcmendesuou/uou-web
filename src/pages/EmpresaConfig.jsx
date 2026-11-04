@@ -5,6 +5,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useOutletContext } from 'react-router-dom';
 import { auth, db, storage } from '../firebase';
 import { canEditCompany, formatCnpj, logCompanyActivity } from '../lib/companies';
+import ImageCropper from '../components/ImageCropper';
 
 const MAX_IMG = 5 * 1024 * 1024; // 5 MB
 
@@ -16,6 +17,7 @@ export default function EmpresaConfig() {
   const [form, setForm] = useState({ tradeName: '', bio: '', site: '', email: '', phone: '' });
   const [logo, setLogo] = useState(null);   // { file, preview }
   const [banner, setBanner] = useState(null);
+  const [cropping, setCropping] = useState(null); // { kind: 'logo' | 'banner', file }
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState({ type: '', text: '' });
 
@@ -34,13 +36,20 @@ export default function EmpresaConfig() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const pick = (setter) => (e) => {
+  const pick = (kind) => (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) { setMsg({ type: 'err', text: 'Escolha um arquivo de imagem.' }); return; }
     if (file.size > MAX_IMG) { setMsg({ type: 'err', text: 'A imagem pode ter no máximo 5 MB.' }); return; }
     setMsg({ type: '', text: '' });
-    setter({ file, preview: URL.createObjectURL(file) });
+    setCropping({ kind, file }); // abre o ajuste de tamanho/posição
+  };
+
+  const cropped = (file) => {
+    const item = { file, preview: URL.createObjectURL(file) };
+    if (cropping?.kind === 'logo') setLogo(item); else setBanner(item);
+    setCropping(null);
   };
 
   const upload = async (item, kind) => {
@@ -83,6 +92,17 @@ export default function EmpresaConfig() {
 
   return (
     <form onSubmit={save} style={s.page}>
+      {cropping && (
+        <ImageCropper
+          file={cropping.file}
+          aspect={cropping.kind === 'logo' ? 1 : 16 / 5}
+          outW={cropping.kind === 'logo' ? 512 : 1600}
+          round={cropping.kind === 'logo'}
+          title={cropping.kind === 'logo' ? 'Ajustar logo' : 'Ajustar banner'}
+          onCancel={() => setCropping(null)}
+          onDone={cropped}
+        />
+      )}
       <h2 style={s.title}>Configurações da empresa</h2>
       {!canEdit && <p style={s.warn}>Só o Dono e o Admin da empresa podem editar estes dados.</p>}
 
@@ -90,7 +110,7 @@ export default function EmpresaConfig() {
         <div style={{ ...s.banner, ...(bannerSrc ? { backgroundImage: `url(${bannerSrc})` } : {}) }}>
           <span style={s.pickHint}><Camera size={16} /> {bannerSrc ? 'Trocar banner' : 'Adicionar banner'} (proporção 16:5)</span>
         </div>
-        {canEdit && <input type="file" accept="image/*" onChange={pick(setBanner)} style={{ display: 'none' }} />}
+        {canEdit && <input type="file" accept="image/*" onChange={pick('banner')} style={{ display: 'none' }} />}
       </label>
 
       <label style={s.logoPick}>
@@ -98,7 +118,7 @@ export default function EmpresaConfig() {
           {logoSrc ? <img src={logoSrc} alt="" style={s.logoImg} /> : <Building2 size={30} color="#52fa35" />}
           {canEdit && <span style={s.logoCam}><Camera size={13} color="#000" /></span>}
         </div>
-        {canEdit && <input type="file" accept="image/*" onChange={pick(setLogo)} style={{ display: 'none' }} />}
+        {canEdit && <input type="file" accept="image/*" onChange={pick('logo')} style={{ display: 'none' }} />}
       </label>
 
       <label style={s.label}>Nome da empresa

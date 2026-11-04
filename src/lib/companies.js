@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import {
+  collection, query, where, orderBy, startAt, endAt, limit, onSnapshot, getDocs, doc, setDoc,
+} from 'firebase/firestore';
 import { db } from '../firebase';
 
 // ── Cargos da empresa (o que cada um pode fazer será definido depois) ──
@@ -10,6 +12,13 @@ export const COMPANY_ROLES = {
   production: 'Produção',
   finance: 'Financeiro',
 };
+
+// Cargos que podem ser dados a quem entra (o Dono é quem abriu a empresa)
+export const ASSIGNABLE_ROLES = ['admin', 'manager', 'production', 'finance'];
+// O que um Admin pode atribuir (só o Dono nomeia outros Admins)
+export const rolesFor = (myRole) => (myRole === 'owner' ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => r !== 'admin'));
+export const canManageTeam = (company, uid) =>
+  !!company && company.status !== 'suspended' && ['owner', 'admin'].includes(company.members?.[uid]);
 
 // Quem pode editar o perfil da empresa (o que cada cargo faz no resto será definido depois)
 export const canEditCompany = (company, uid) =>
@@ -108,4 +117,42 @@ export function useMyCompanyRequests(uid) {
     );
   }, [uid]);
   return requests;
+}
+
+// Convites recebidos pelo usuário
+export function useMyInvites(uid) {
+  const [invites, setInvites] = useState([]);
+  useEffect(() => {
+    if (!uid) return undefined;
+    const q = query(collection(db, 'company_invites'), where('toUid', '==', uid));
+    return onSnapshot(q, (snap) => setInvites(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setInvites([]));
+  }, [uid]);
+  return invites;
+}
+
+// Convites enviados por uma empresa (visíveis a Dono/Admin)
+export function useCompanyInvites(companyId) {
+  const [invites, setInvites] = useState([]);
+  useEffect(() => {
+    if (!companyId) return undefined;
+    const q = query(collection(db, 'company_invites'), where('companyId', '==', companyId));
+    return onSnapshot(q, (snap) => setInvites(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setInvites([]));
+  }, [companyId]);
+  return invites;
+}
+
+// Busca pessoas pelo nome (início do nome) ou pelo e-mail exato
+export async function searchUsers(term) {
+  const t = term.trim();
+  if (t.length < 2) return [];
+  const variants = [...new Set([t, t.toLowerCase(), t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()])];
+  const found = new Map();
+  const queries = variants.map((v) => query(collection(db, 'users'), orderBy('name'), startAt(v), endAt(v + '\uf8ff'), limit(8)));
+  if (t.includes('@')) queries.push(query(collection(db, 'users'), where('email', '==', t.toLowerCase()), limit(3)));
+  const results = await Promise.allSettled(queries.map((q) => getDocs(q)));
+  results.forEach((r) => {
+    if (r.status !== 'fulfilled') return;
+    r.value.docs.forEach((d) => found.set(d.id, { id: d.id, ...d.data() }));
+  });
+  return [...found.values()].slice(0, 10);
 }

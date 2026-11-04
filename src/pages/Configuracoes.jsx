@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Building2, BadgeCheck, Plus, Upload, FileText, X } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, deleteDoc, arrayUnion } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { auth, db, storage } from '../firebase';
 import {
   COMPANY_ROLES, REQUEST_STATUS, formatCnpj, onlyDigits, validCnpj,
-  useMyCompanies, useMyCompanyRequests,
+  useMyCompanies, useMyCompanyRequests, useMyInvites, logCompanyActivity,
 } from '../lib/companies';
 
 const MAX_FILE = 10 * 1024 * 1024; // 10 MB
@@ -18,6 +18,8 @@ export default function Configuracoes() {
   const uid = auth.currentUser?.uid;
   const companies = useMyCompanies(uid);
   const requests = useMyCompanyRequests(uid);
+  const invites = useMyInvites(uid).filter((i) => i.status === 'pending');
+  const [inviteBusy, setInviteBusy] = useState('');
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY);
@@ -89,6 +91,28 @@ export default function Configuracoes() {
     }
   };
 
+  const acceptInvite = async (inv) => {
+    setInviteBusy(inv.id); setError('');
+    try {
+      await updateDoc(doc(db, 'companies', inv.companyId), {
+        memberUids: arrayUnion(uid),
+        [`members.${uid}`]: inv.role,
+      });
+      await deleteDoc(doc(db, 'company_invites', inv.id));
+      logCompanyActivity(inv.companyId, uid, 'member_joined', { role: inv.role });
+    } catch (err) {
+      console.error('[Configuracoes] aceitar convite', err);
+      setError('Não foi possível aceitar o convite. (' + (err?.code || err?.message || 'erro') + ')');
+    } finally { setInviteBusy(''); }
+  };
+
+  const declineInvite = async (inv) => {
+    setInviteBusy(inv.id);
+    try { await deleteDoc(doc(db, 'company_invites', inv.id)); }
+    catch (err) { setError('Não foi possível recusar o convite. (' + (err?.code || err?.message || 'erro') + ')'); }
+    finally { setInviteBusy(''); }
+  };
+
   const openRequests = requests.filter((r) => r.status !== 'approved');
 
   return (
@@ -123,7 +147,18 @@ export default function Configuracoes() {
         </div>
 
         {companies === null && <p style={s.muted}>Carregando…</p>}
-        {companies?.length === 0 && openRequests.length === 0 && !showForm && !done && (
+        {invites.map((inv) => (
+          <div key={inv.id} style={s.row}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong>Convite de {inv.companyName}</strong>
+              <div style={s.muted}>Cargo: {COMPANY_ROLES[inv.role] || inv.role}{inv.invitedByName ? ` · convidado por ${inv.invitedByName}` : ''}</div>
+            </div>
+            <button type="button" style={s.btn} disabled={inviteBusy === inv.id} onClick={() => acceptInvite(inv)}>Aceitar</button>
+            <button type="button" style={s.btnGhost} disabled={inviteBusy === inv.id} onClick={() => declineInvite(inv)}>Recusar</button>
+          </div>
+        ))}
+
+        {companies?.length === 0 && openRequests.length === 0 && invites.length === 0 && !showForm && !done && (
           <p style={s.muted}>Você ainda não participa de nenhuma empresa.</p>
         )}
 
@@ -238,6 +273,10 @@ const s = {
     display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(82, 250, 53, 0.05)', color: '#52fa35',
     border: '1px solid #52fa35', borderRadius: 10, padding: '9px 14px', fontWeight: 700, fontSize: 13,
     cursor: 'pointer', fontFamily: 'inherit',
+  },
+  btnGhost: {
+    background: 'transparent', color: '#bbb', border: '1px solid #333', borderRadius: 10, padding: '9px 14px',
+    fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
   },
   btnDisabled: {
     background: '#16161d', color: '#666', border: '1px solid #26262e', borderRadius: 10,
