@@ -6,6 +6,8 @@ import {
 import { db, auth } from '../firebase';
 import { usePostLike, postLink } from '../lib/postActions';
 import CommentsPanel from './CommentsPanel';
+import MusicChip from './MusicChip';
+import { useMusicPreview } from '../lib/music';
 import {
   Heart, MessageCircle, Send, Lock, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Radio, Users, CalendarClock,
 } from 'lucide-react';
@@ -359,6 +361,8 @@ function PostCard({ post, onWheel, following }) {
   const videoRef = useRef(null);
   const [paused, setPaused] = useState(false);
   const { liked, count: likeCount, toggle: toggleLike } = usePostLike(post);
+  // Música do post: toca a prévia ao clicar (igual ao app, vídeo não toca música)
+  const musicPreview = useMusicPreview(post.id, isVideo ? null : post.music?.previewUrl);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyLink = async () => {
@@ -457,6 +461,11 @@ function PostCard({ post, onWheel, following }) {
 
       {/* Legenda — embaixo, com degradê */}
       <div style={styles.bottomInfo}>
+        {!locked && post.music?.trackName && (
+          <div style={{ marginBottom: 8 }}>
+            <MusicChip music={post.music} playing={musicPreview.playing} onToggle={isVideo ? undefined : musicPreview.toggle} />
+          </div>
+        )}
         {!locked && post.caption && <p style={styles.caption}>{post.caption}</p>}
       </div>
       {commentsOpen && <CommentsPanel post={post} onClose={() => setCommentsOpen(false)} />}

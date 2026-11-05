@@ -4,6 +4,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { Heart, MessageCircle, Lock } from 'lucide-react';
 import { db, auth } from '../firebase';
 import { usePostComments, commentTime } from '../lib/postActions';
+import MusicChip from '../components/MusicChip';
+import { useMusicPreview } from '../lib/music';
 
 const isVideoUrl = (u) => /\.(mp4|mov|webm|m4v)(\?|$)/i.test(u || '');
 
@@ -34,6 +36,7 @@ export default function PostPublico() {
   }, [postId]);
 
   const goApp = () => navigate(logged ? '/' : '/login');
+  const musicPreview = useMusicPreview(postId, post?.music?.previewUrl);
 
   if (post === undefined) return <div style={s.page}><p style={s.muted}>Carregando...</p></div>;
   if (post === null) {
@@ -57,8 +60,8 @@ export default function PostPublico() {
         <div style={s.logo}>UOU</div>
 
         <div style={s.author}>
-          <img src={author?.photoURL || 'https://via.placeholder.com/40'} alt="" style={s.avatar} />
-          <strong>{author?.name || 'Usuário'}</strong>
+          <img src={author?.photoURL || post.userPhoto || 'https://via.placeholder.com/40'} alt="" style={s.avatar} />
+          <strong>{author?.name || post.userName || 'Usuário'}</strong>
         </div>
 
         <div style={s.media}>
@@ -79,6 +82,10 @@ export default function PostPublico() {
           </div>
         )}
 
+        {!locked && post.music?.trackName && (
+          <MusicChip music={post.music} playing={musicPreview.playing} onToggle={m.video ? undefined : musicPreview.toggle}
+            style={{ background: '#222224', borderRadius: 14, marginBottom: 8 }} />
+        )}
         {!locked && post.caption && <p style={s.caption}>{post.caption}</p>}
 
         <div style={s.counts}>

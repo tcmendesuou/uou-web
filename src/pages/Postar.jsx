@@ -5,6 +5,9 @@ import { collection, addDoc, getDoc, doc, updateDoc } from 'firebase/firestore';
 import { storage, db, auth } from '../firebase';
 import { Images, Plus, X, Radio, Camera, Smile, MapPin, Music2, Maximize, RefreshCw } from 'lucide-react';
 import LiveForm from '../components/LiveForm';
+import MusicPicker from '../components/MusicPicker';
+import MusicChip from '../components/MusicChip';
+import { useMusicPreview } from '../lib/music';
 import { companyAuthor, logCompanyActivity } from '../lib/companies';
 
 const MAX_MEDIA = 3;
@@ -192,6 +195,9 @@ function PostarNovo({ company = null }) {
   const [active, setActive] = useState(0);
   const [caption, setCaption] = useState('');
   const [exclusive, setExclusive] = useState(false);
+  const [music, setMusic] = useState(null); // { trackName, artistName, artworkUrl, previewUrl }
+  const [showMusic, setShowMusic] = useState(false);
+  const musicPreview = useMusicPreview('picker-chip', music?.previewUrl);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError] = useState('');
@@ -283,6 +289,7 @@ function PostarNovo({ company = null }) {
         ...author,
         likes: 0,
         commentsCount: 0,
+        ...(music ? { music } : {}),
         createdAt: new Date().toISOString(),
       };
 
@@ -448,6 +455,12 @@ function PostarNovo({ company = null }) {
           })}
         </div>
 
+        {music && (
+          <div style={{ margin: '4px 0 10px' }}>
+            <MusicChip music={music} playing={musicPreview.playing} onToggle={musicPreview.toggle} onRemove={() => setMusic(null)} />
+          </div>
+        )}
+
         <div style={ns.actionRow}>
           {[
             { label: 'Marcar', icon: Smile },
@@ -459,7 +472,7 @@ function PostarNovo({ company = null }) {
               key={label}
               type="button"
               style={ns.action}
-              onClick={() => window.alert(`${label}: em breve na web.`)}
+              onClick={() => (label === 'Música' ? setShowMusic(true) : window.alert(`${label}: em breve na web.`))}
             >
               <Icon size={17} color="#fff" />
               <span style={ns.actionLabel}>{label}</span>
@@ -476,6 +489,8 @@ function PostarNovo({ company = null }) {
           {uploading ? 'Enviando...' : 'Publicar'}
         </button>
       </div>
+
+      {showMusic && <MusicPicker onClose={() => setShowMusic(false)} onSelect={setMusic} />}
 
       {uploading && (
         <div style={styles.uploadingOverlay}>
