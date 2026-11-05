@@ -12,6 +12,7 @@ const Chat = lazy(() => import('./pages/Chat'));
 const Carteira = lazy(() => import('./pages/Carteira'));
 const Perfil = lazy(() => import('./pages/Perfil'));
 const Criar = lazy(() => import('./pages/Criar'));
+const EmpresaPosts = lazy(() => import('./pages/EmpresaPosts'));
 const Postar = lazy(() => import('./pages/Postar'));
 const Lives = lazy(() => import('./pages/Lives'));
 const LiveViewer = lazy(() => import('./pages/LiveViewer'));
@@ -83,6 +84,7 @@ export default function App() {
           <Route path="empresa" element={<Empresa />} />
           <Route path="empresa/configuracoes" element={<EmpresaConfig />} />
           <Route path="empresa/equipe" element={<Equipe />} />
+          <Route path="empresa/posts" element={<EmpresaPosts />} />
           <Route path="empresa/:tab" element={<EmpresaEmBreve />} />
         </Route>
         <Route path="/p/:postId" element={<PostPublico />} />

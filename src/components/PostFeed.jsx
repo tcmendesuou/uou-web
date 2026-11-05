@@ -180,6 +180,10 @@ export default function PostFeed({ selectedTab, searchText }) {
     const attachUserData = async (rawDocs) => {
       const promises = rawDocs.map(async (docSnap) => {
         const post = docSnap.data();
+        if (post.companyId) {
+          // Em nome da empresa: nome e logo vêm gravados no próprio post
+          return { id: docSnap.id, ...post, userName: post.userName || 'Empresa', userPhoto: post.userPhoto || null, userHandle: null };
+        }
         const userData = await getUserData(post.userId);
         return {
           id: docSnap.id,

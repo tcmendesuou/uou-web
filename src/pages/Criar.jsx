@@ -9,6 +9,7 @@ import { fetchLiveRecordings } from '../lib/stream';
 import { CheckCircle2, Video, MonitorUp, Radio, RefreshCw, Trash2, Send, Scissors, Upload, Film } from 'lucide-react';
 import VideoEditor from '../components/VideoEditor';
 import Panel from '../components/Panel';
+import { logCompanyActivity } from '../lib/companies';
 
 const CSS = `
 .uou-edit-grid{display:grid;gap:4px;grid-template-columns:300px minmax(0,1fr);grid-template-areas:"proj lib";height:calc(100vh - 190px);min-height:520px}
@@ -24,9 +25,12 @@ const TABS = [
 
 const videoName = (v) => (v.originalName || v.name || v.title || 'Vídeo sem nome').replace(/\.[^.]+$/, '');
 
-export default function Criar() {
+export default function Criar({ company = null }) {
   const navigate = useNavigate();
-  const uid = auth.currentUser?.uid;
+  const myUid = auth.currentUser?.uid;
+  // Em nome da empresa: biblioteca e projetos são da empresa (id = CNPJ) e ficam em pasta própria
+  const uid = company?.id || myUid;
+  const ownerExtra = company ? { companyId: company.id, createdBy: myUid } : {};
   const [activeTab, setActiveTab] = useState('prontos');
   const [videos, setVideos] = useState([]);
   const [uploadingRaw, setUploadingRaw] = useState(false);
@@ -102,18 +106,20 @@ export default function Criar() {
     try {
       setUploadingRaw(true);
       const fileName = `${Date.now()}_${file.name}`;
-      const storageRef = ref(storage, `creator_videos/${uid}/raw/${fileName}`);
+      const storageRef = ref(storage, company ? `company_videos/${uid}/raw/${fileName}` : `creator_videos/${uid}/raw/${fileName}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
       await addDoc(collection(db, 'creator_videos'), {
         userId: uid,
+        ...ownerExtra,
         status: 'raw',
         storagePath: storageRef.fullPath,
         url,
         originalName: file.name,
         createdAt: new Date().toISOString(),
       });
+      if (company) await logCompanyActivity(company.id, myUid, 'video_uploaded', { name: file.name });
     } catch (err) {
       console.error('[Criar] Erro ao subir vídeo bruto:', err);
       alert('Não foi possível enviar o vídeo bruto.');
@@ -216,18 +222,21 @@ export default function Criar() {
   const handleExported = async (blob, exportName) => {
     try {
       const fileName = `${Date.now()}.mp4`;
-      const storageRef = ref(storage, `creator_videos/${uid}/ready/${fileName}`);
+      const storageRef = ref(storage, company ? `company_videos/${uid}/ready/${fileName}` : `creator_videos/${uid}/ready/${fileName}`);
       await uploadBytes(storageRef, blob);
       const url = await getDownloadURL(storageRef);
 
+      const exportedName = exportName || editorProject?.name || `Vídeo editado ${new Date().toLocaleDateString('pt-BR')}`;
       await addDoc(collection(db, 'creator_videos'), {
         userId: uid,
+        ...ownerExtra,
         status: 'ready',
         storagePath: storageRef.fullPath,
         url,
-        originalName: exportName || editorProject?.name || `Vídeo editado ${new Date().toLocaleDateString('pt-BR')}`,
+        originalName: exportedName,
         createdAt: new Date().toISOString(),
       });
+      if (company) await logCompanyActivity(company.id, myUid, 'video_exported', { name: exportedName });
 
       setEditorClips(null);
       setEditorProject(null);
@@ -240,7 +249,7 @@ export default function Criar() {
 
   // ✅ Manda um vídeo pronto direto pra tela de Postar, sem re-upload
   const handlePostarVideo = (video) => {
-    navigate('/postar', { state: { readyVideo: video } });
+    navigate(company ? '/empresa/posts' : '/postar', { state: { readyVideo: video } });
   };
 
   return (
@@ -281,7 +290,7 @@ export default function Criar() {
           )}
         </Panel>
 
-        <Panel area="lib" tabs={TABS} activeTab={activeTab} onTab={setActiveTab}>
+        <Panel area="lib" tabs={company ? TABS.filter((t) => t.id !== 'lives') : TABS} activeTab={activeTab} onTab={setActiveTab}>
           {activeTab === 'prontos' && (
             <div>
               {prontos.length === 0 ? (
@@ -406,6 +415,7 @@ export default function Criar() {
           project={editorProject}
           onClose={() => { setEditorClips(null); setEditorProject(null); }}
           onExported={handleExported}
+          company={company}
         />
       )}
     </div>

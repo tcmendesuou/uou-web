@@ -55,7 +55,7 @@ export function usePostLike(post) {
           userId: uid, postId: post.id, postOwnerId: post.userId, createdAt: new Date().toISOString(),
         });
         await updateDoc(postRef, { likes: increment(1) });
-        if (post.userId !== uid) {
+        if (post.userId !== uid && !post.companyId) {
           const u = await myProfile(uid);
           await addDoc(collection(db, 'notifications'), {
             userId: post.userId,
@@ -103,7 +103,7 @@ export async function sendPostComment(post, text) {
     createdAt: new Date().toISOString(),
   });
   await updateDoc(doc(db, 'posts', post.id), { commentsCount: increment(1) });
-  if (post.userId && post.userId !== uid) {
+  if (post.userId && post.userId !== uid && !post.companyId) {
     await addDoc(collection(db, 'notifications'), {
       userId: post.userId,
       type: 'comment',

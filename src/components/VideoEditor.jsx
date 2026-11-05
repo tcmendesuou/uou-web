@@ -90,7 +90,9 @@ const libraryFromProject = (project) => {
   }));
 };
 
-export default function VideoEditor({ initialClips = [], project = null, onClose, onExported }) {
+export default function VideoEditor({ initialClips = [], project = null, onClose, onExported, company = null }) {
+  // Em nome da empresa: a biblioteca e os projetos pertencem à empresa (id = CNPJ), não à pessoa
+  const ownerKey = company?.id || null;
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const video2Ref = useRef(null); // segundo vídeo: só aparece durante as transições
@@ -215,7 +217,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
 
   // Biblioteca do criador (mesma coleção da página Criar): Brutos e Prontos
   useEffect(() => {
-    const uid = auth.currentUser?.uid;
+    const uid = ownerKey || auth.currentUser?.uid;
     if (!uid) return undefined;
     return onSnapshot(
       query(collection(db, 'creator_videos'), where('userId', '==', uid)),
@@ -226,7 +228,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
       },
       (err) => console.error('[Editor] erro ao carregar biblioteca:', err)
     );
-  }, []);
+  }, [ownerKey]);
 
   const addCloud = (video) => {
     importItems([{ name: video.originalName || 'Vídeo', url: video.url }]);
@@ -245,7 +247,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   // Guarda a linha do tempo no Firestore. Vídeos do computador sobem junto (uma vez só),
   // para o projeto poder ser reaberto depois em qualquer lugar.
   const doSave = async () => {
-    const uid = auth.currentUser?.uid;
+    const uid = ownerKey || auth.currentUser?.uid;
     if (!uid) return true;
     if (!clipsRef.current.length && !projectIdRef.current) return true;
     setSaveState('saving');
@@ -255,7 +257,9 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         let url = l.remoteUrl || (l.file ? null : l.url);
         let path = l.storagePath;
         if (!url) {
-          const r = storageRef(storage, `creator_videos/${uid}/project/${Date.now()}_${l.name}`);
+          const r = storageRef(storage, ownerKey
+            ? `company_videos/${ownerKey}/project/${Date.now()}_${l.name}`
+            : `creator_videos/${uid}/project/${Date.now()}_${l.name}`);
           // eslint-disable-next-line no-await-in-loop
           await uploadBytes(r, l.file);
           // eslint-disable-next-line no-await-in-loop
@@ -270,6 +274,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
       const thumb = libRef.current.find((l) => l.id === first?.srcId)?.thumbs?.[0];
       const data = JSON.parse(JSON.stringify({
         userId: uid,
+        ...(ownerKey ? { companyId: ownerKey, createdBy: auth.currentUser?.uid } : {}),
         name: nameRef.current.trim() || 'Projeto sem título',
         ratio: ratioRef.current.id,
         clips: clipsRef.current.map((c) => ({ id: c.id, srcId: c.srcId, in: c.in, out: c.out, filter: c.filter, transition: c.transition })),

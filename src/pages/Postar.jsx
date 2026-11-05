@@ -5,10 +5,11 @@ import { collection, addDoc, getDoc, doc, updateDoc } from 'firebase/firestore';
 import { storage, db, auth } from '../firebase';
 import { Images, Plus, X, Radio, Camera, Smile, MapPin, Music2, Maximize, RefreshCw } from 'lucide-react';
 import LiveForm from '../components/LiveForm';
+import { companyAuthor, logCompanyActivity } from '../lib/companies';
 
 const MAX_MEDIA = 3;
 
-export default function Postar() {
+export default function Postar({ company = null }) {
   const navigate = useNavigate();
   const location = useLocation();
   // ✅ Veio da aba Prontos (Criar): já tem o vídeo editado e salvo no
@@ -18,8 +19,11 @@ export default function Postar() {
   const [mode, setMode] = useState('post');
 
   if (readyVideo) {
-    return <PostarVideoPronto video={readyVideo} onDone={() => navigate('/')} />;
+    return <PostarVideoPronto video={readyVideo} company={company} onDone={() => (company ? navigate('/empresa/posts', { state: { tab: 'publicados' } }) : navigate('/'))} />;
   }
+
+  // Em nome da empresa: só post (a live da empresa chega junto com o Financeiro dela)
+  if (company) return <PostarNovo company={company} />;
 
   return (
     <div>
@@ -46,7 +50,7 @@ export default function Postar() {
   );
 }
 
-function PostarVideoPronto({ video, onDone }) {
+function PostarVideoPronto({ video, onDone, company = null }) {
   const [caption, setCaption] = useState('');
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState('');
@@ -59,21 +63,32 @@ function PostarVideoPronto({ video, onDone }) {
     setError('');
     setPosting(true);
     try {
-      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-      const userData = userDoc.exists() ? userDoc.data() : {};
+      let author;
+      if (company) {
+        author = companyAuthor(company);
+      } else {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        const userData = userDoc.exists() ? userDoc.data() : {};
+        author = {
+          userId: auth.currentUser.uid,
+          userName: userData?.name || 'Usuário',
+          userPhoto: userData?.photoURL || null,
+        };
+      }
 
-      await addDoc(collection(db, 'posts'), {
+      const postRef = await addDoc(collection(db, 'posts'), {
         type: 'video',
         mediaUrl: video.url,
         mediaType: 'video',
         caption: caption.trim(),
-        userId: auth.currentUser.uid,
-        userName: userData?.name || 'Usuário',
-        userPhoto: userData?.photoURL || null,
+        ...author,
         likes: 0,
         commentsCount: 0,
         createdAt: new Date().toISOString(),
       });
+      if (company) {
+        await logCompanyActivity(company.id, auth.currentUser.uid, 'post_created', { postId: postRef.id, kind: 'video' });
+      }
 
       // Marca o vídeo na biblioteca como já postado (continua em Prontos,
       // só fica sinalizado — nada é apagado automaticamente).
@@ -170,7 +185,7 @@ const uniqueSuffix = () => `${Date.now()}_${Math.random().toString(36).slice(2, 
 
 // Tela "Criar" igual ao app: área de mídia + folha com legenda, sugestões,
 // miniaturas, ações e botão Publicar.
-function PostarNovo() {
+function PostarNovo({ company = null }) {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
   const [mediaList, setMediaList] = useState([]); // [{file, previewUrl, type}]
@@ -215,7 +230,10 @@ function PostarNovo() {
     setUploadProgress(`Enviando mídia ${index + 1} de ${total}...`);
     const uid = auth.currentUser.uid;
     const ext = item.type === 'video' ? 'mp4' : 'jpg';
-    const storageRef = ref(storage, `posts/${uid}/post_${uniqueSuffix()}.${ext}`);
+    // Empresa: pasta própria (company_posts/<cnpj>/...), liberada pelas regras só para a equipe
+    const storageRef = ref(storage, company
+      ? `company_posts/${company.id}/post_${uniqueSuffix()}.${ext}`
+      : `posts/${uid}/post_${uniqueSuffix()}.${ext}`);
     await uploadBytes(storageRef, item.file);
     const url = await getDownloadURL(storageRef);
 
@@ -223,7 +241,9 @@ function PostarNovo() {
     const thumbBlob = await makeThumbBlob(item.file, item.type);
     if (thumbBlob) {
       try {
-        const thumbRef = ref(storage, `thumbnails/${uid}/thumb_${uniqueSuffix()}.jpg`);
+        const thumbRef = ref(storage, company
+          ? `company_posts/${company.id}/thumb_${uniqueSuffix()}.jpg`
+          : `thumbnails/${uid}/thumb_${uniqueSuffix()}.jpg`);
         await uploadBytes(thumbRef, thumbBlob);
         thumbnailUrl = await getDownloadURL(thumbRef);
       } catch (err) {
@@ -245,41 +265,59 @@ function PostarNovo() {
       }
       setUploadProgress('Salvando post...');
 
-      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-      const userData = userDoc.exists() ? userDoc.data() : {};
+      let author;
+      if (company) {
+        author = companyAuthor(company);
+      } else {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        const userData = userDoc.exists() ? userDoc.data() : {};
+        author = {
+          userId: auth.currentUser.uid,
+          userName: userData?.name || 'Usuário',
+          userPhoto: userData?.photoURL || null,
+        };
+      }
       const base = {
         exclusive,
         caption: caption.trim(),
-        userId: auth.currentUser.uid,
-        userName: userData?.name || 'Usuário',
-        userPhoto: userData?.photoURL || null,
+        ...author,
         likes: 0,
         commentsCount: 0,
         createdAt: new Date().toISOString(),
       };
 
       // Igual ao app: 1 mídia = foto/vídeo com capa; 2 ou 3 = carrossel
+      let postId = null;
       if (uploaded.length === 1) {
         const one = uploaded[0];
-        await addDoc(collection(db, 'posts'), {
+        const r1 = await addDoc(collection(db, 'posts'), {
           type: one.type === 'video' ? 'video' : 'photo',
           mediaType: one.type,
           mediaUrl: one.url,
           thumbnailUrl: one.thumbnailUrl,
           ...base,
         });
+        postId = r1.id;
       } else {
-        await addDoc(collection(db, 'posts'), {
+        const r2 = await addDoc(collection(db, 'posts'), {
           type: 'carousel',
           mediaItems: uploaded,
           mediaUrl: uploaded[0].url,
           mediaType: uploaded[0].type,
           ...base,
         });
+        postId = r2.id;
+      }
+
+      if (company) {
+        await logCompanyActivity(company.id, auth.currentUser.uid, 'post_created', {
+          postId, kind: uploaded.length === 1 ? uploaded[0].type : 'carousel',
+        });
       }
 
       mediaList.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      navigate('/');
+      if (company) navigate('/empresa/posts', { state: { tab: 'publicados' } });
+      else navigate('/');
     } catch (err) {
       console.error('[Criar] Erro ao criar post:', err);
       setError('Não foi possível criar o post. Tente novamente.');
@@ -304,7 +342,7 @@ function PostarNovo() {
       />
 
       <div style={ns.topBar}>
-        <button type="button" style={ns.roundBtn} onClick={() => navigate(-1)} aria-label="Fechar">
+        <button type="button" style={ns.roundBtn} onClick={() => (company ? navigate('/empresa/posts', { state: { tab: 'publicados' } }) : navigate(-1))} aria-label="Fechar">
           <X size={20} color="#fff" />
         </button>
         <span style={ns.titlePill}>Novo post</span>

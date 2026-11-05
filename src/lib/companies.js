@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   collection, query, where, orderBy, startAt, endAt, limit, onSnapshot, getDocs, doc, setDoc,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 
 // ── Cargos da empresa (o que cada um pode fazer será definido depois) ──
 export const COMPANY_ROLES = {
@@ -25,6 +25,22 @@ export const canEditCompany = (company, uid) =>
   !!company && company.status !== 'suspended' && ['owner', 'admin'].includes(company.members?.[uid]);
 
 export const isSuspended = (company) => company?.status === 'suspended';
+
+// Quem da equipe pode publicar em nome da empresa (por enquanto qualquer membro; por cargo será definido depois)
+export const canPublish = (company, uid) =>
+  !!company && company.status !== 'suspended' && !!company.members?.[uid];
+
+// Campos de autor de um post/vídeo feito em nome da empresa.
+// `userId` = id da empresa (CNPJ): o post não aparece no perfil pessoal de ninguém.
+// `authorUid` guarda quem da equipe publicou.
+export const companyAuthor = (company) => ({
+  userId: company.id,
+  userName: company.tradeName || company.legalName || 'Empresa',
+  userPhoto: company.photoURL || null,
+  companyId: company.id,
+  isCompany: true,
+  authorUid: auth.currentUser?.uid || null,
+});
 
 // Registro interno de atividades da empresa (quem fez o quê e quando)
 export async function logCompanyActivity(companyId, uid, type, extra = {}) {
