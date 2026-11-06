@@ -219,7 +219,7 @@ export default function Criar({ company = null }) {
   };
 
   // ✅ Editor terminou de exportar: sobe o vídeo final pra "Prontos"
-  const handleExported = async (blob, exportName) => {
+  const handleExported = async (blob, exportName, extra = {}) => {
     try {
       const fileName = `${Date.now()}.mp4`;
       const storageRef = ref(storage, company ? `company_videos/${uid}/ready/${fileName}` : `creator_videos/${uid}/ready/${fileName}`);
@@ -234,6 +234,7 @@ export default function Criar({ company = null }) {
         storagePath: storageRef.fullPath,
         url,
         originalName: exportedName,
+        ...(extra?.music ? { music: extra.music } : {}),
         createdAt: new Date().toISOString(),
       });
       if (company) await logCompanyActivity(company.id, myUid, 'video_exported', { name: exportedName });

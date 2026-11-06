@@ -10,6 +10,8 @@ import { exportTimeline } from '../lib/editorExport';
 import { FILTERS, filterCss } from '../lib/editorFilters';
 import { TEXT_FONTS, TEXT_STYLES, TEXT_ANIMS, TEXT_COLORS, makeText, textState, textCss } from '../lib/editorText';
 import { TRANSITIONS, DEFAULT_TRANSITION_SECONDS, transitionAt, effectParams, cssFor } from '../lib/editorTransitions';
+import MusicPicker from './MusicPicker';
+import MusicChip from './MusicChip';
 import {
   Radio, X, Plus, Play, Pause, Scissors, Trash2, Undo2, Redo2, SkipBack, Download, Type, Music2,
   Sparkles, Gauge, Subtitles, Blend, ZoomIn, ZoomOut, Film, ChevronLeft, ChevronRight, Video, CheckCircle2, MonitorUp,
@@ -84,6 +86,7 @@ const libraryFromProject = (project) => {
   const media = project?.media || [];
   (project?.clips || []).forEach((c) => { if (c.id >= idCounter) idCounter = c.id + 1; });
   (project?.texts || []).forEach((c) => { if (c.id >= idCounter) idCounter = c.id + 1; });
+  (project?.audios || []).forEach((c) => { if (c.id >= idCounter) idCounter = c.id + 1; });
   media.forEach((m) => { if (m.id >= idCounter) idCounter = m.id + 1; });
   return media.map((m) => ({
     id: m.id, name: m.name, url: m.url, file: null, duration: m.duration || 0, thumbs: [], step: m.duration || 1, storagePath: m.storagePath,
@@ -109,6 +112,13 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const [selected, setSelected] = useState(null);
   const [texts, setTexts] = useState(() => (project?.texts || []).map((t) => ({ ...t })));
   const [selectedText, setSelectedText] = useState(null);
+  // Áudio: faixas enviadas pelo criador (entram no vídeo) e música do iTunes (sticker do post, não entra no arquivo)
+  const [audios, setAudios] = useState(() => (project?.audios || []).map((a) => ({ ...a, file: null })));
+  const [music, setMusic] = useState(project?.music || null);
+  const [videoVol, setVideoVol] = useState(project?.videoVol ?? 1);
+  const [selectedAudio, setSelectedAudio] = useState(null);
+  const [showMusic, setShowMusic] = useState(false);
+  const audioInputRef = useRef(null);
   const [time, setTime] = useState(0); // posição na linha do tempo (s)
   const [playing, setPlaying] = useState(false);
   const [pps, setPps] = useState(70); // pixels por segundo (zoom)
@@ -127,6 +137,8 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const cloudRef = useRef([]); cloudRef.current = cloud;
   const clipsRef = useRef(clips); clipsRef.current = clips;
   const textsRef = useRef(texts); textsRef.current = texts;
+  const audiosRef = useRef(audios); audiosRef.current = audios;
+  const musicRef = useRef(music); musicRef.current = music;
   const screenRef = useRef(null);
   const timeRef = useRef(0);
   const nameRef = useRef(name); nameRef.current = name;
@@ -152,10 +164,10 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   const srcOf = (srcId) => libRef.current.find((l) => l.id === srcId);
 
   // -------- histórico (desfazer / refazer) --------
-  const snap = () => ({ clips: clipsRef.current, texts: textsRef.current });
-  const restore = (h) => { setClips(h.clips); setTexts(h.texts); };
+  const snap = () => ({ clips: clipsRef.current, texts: textsRef.current, audios: audiosRef.current, music: musicRef.current });
+  const restore = (h) => { setClips(h.clips); setTexts(h.texts); setAudios(h.audios || []); setMusic(h.music || null); };
   const commit = useCallback((next) => {
-    setPast((p) => [...p.slice(-49), { clips: clipsRef.current, texts: textsRef.current }]);
+    setPast((p) => [...p.slice(-49), { clips: clipsRef.current, texts: textsRef.current, audios: audiosRef.current, music: musicRef.current }]);
     setFuture([]);
     setClips(next);
   }, []);
@@ -270,6 +282,24 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         }
         media.push({ id: l.id, name: l.name, url, duration: l.duration, storagePath: path });
       }
+      const savedAudios = [];
+      for (const a of audiosRef.current) {
+        let url = a.remoteUrl || (a.file ? null : a.url);
+        let path = a.storagePath;
+        if (!url) {
+          const r = storageRef(storage, ownerKey
+            ? `company_videos/${ownerKey}/project/${Date.now()}_${a.name}`
+            : `creator_videos/${uid}/project/${Date.now()}_${a.name}`);
+          // eslint-disable-next-line no-await-in-loop
+          await uploadBytes(r, a.file);
+          // eslint-disable-next-line no-await-in-loop
+          url = await getDownloadURL(r);
+          path = r.fullPath;
+          audiosRef.current = audiosRef.current.map((x) => (x.id === a.id ? { ...x, remoteUrl: url, storagePath: path } : x));
+          setAudios(audiosRef.current);
+        }
+        savedAudios.push({ id: a.id, name: a.name, url, storagePath: path, start: a.start, in: a.in, dur: a.dur, srcDur: a.srcDur, volume: a.volume ?? 1 });
+      }
       const first = clipsRef.current[0];
       const thumb = libRef.current.find((l) => l.id === first?.srcId)?.thumbs?.[0];
       const data = JSON.parse(JSON.stringify({
@@ -280,6 +310,9 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         clips: clipsRef.current.map((c) => ({ id: c.id, srcId: c.srcId, in: c.in, out: c.out, filter: c.filter, transition: c.transition })),
         texts: textsRef.current.map((t) => ({ id: t.id, text: t.text, start: t.start, dur: t.dur, x: t.x, y: t.y, size: t.size, color: t.color, font: t.font, style: t.style, anim: t.anim })),
         media,
+        audios: savedAudios,
+        music: musicRef.current || null,
+        videoVol,
         duration: totalRef.current,
         thumb: thumb && thumb.length < 100000 ? thumb : null,
         updatedAt: new Date().toISOString(),
@@ -313,7 +346,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     const t = setTimeout(saveProject, 2000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clips, texts, name, ratio, library.length]);
+  }, [clips, texts, audios, music, videoVol, name, ratio, library.length]);
 
   // Projeto reaberto: refaz as miniaturas
   useEffect(() => {
@@ -373,8 +406,11 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
         onProgress: setExportPct,
         signal: cancelRef.current,
         texts: textsRef.current,
+        audios: audiosRef.current.map((a) => ({ file: a.file || undefined, url: a.remoteUrl || a.url, start: a.start, in: a.in, dur: a.dur, volume: a.volume ?? 1 })),
+        videoVolume: videoVol,
       });
-      if (onExported) await onExported(blob, finalName);
+      // A música do iTunes não entra no arquivo: segue junto do vídeo pronto e vira o sticker do post
+      if (onExported) await onExported(blob, finalName, { music: musicRef.current || null });
       else {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -688,6 +724,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   };
   const pickText = (item) => {
     setSelected(null);
+    setSelectedAudio(null);
     setSelectedText(item.id);
     const t = timeRef.current;
     if (t < item.start || t >= item.start + item.dur) { setPlaying(false); seek(item.start + Math.min(0.5, item.dur / 2)); }
@@ -748,6 +785,117 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     return { map: out, count: Math.max(1, ends.length) };
   }, [texts]);
 
+  // -------- áudio --------
+  const selectedAudioItem = audios.find((a) => a.id === selectedAudio) || null;
+  const patchAudio = (id, patch, history = true) => {
+    if (history) pushHistory();
+    setAudios(audiosRef.current.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  };
+  const addAudioFiles = async (e) => {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('audio'));
+    e.target.value = '';
+    for (const file of files) {
+      const url = URL.createObjectURL(file);
+      const a = new Audio();
+      a.preload = 'metadata';
+      a.src = url;
+      // eslint-disable-next-line no-await-in-loop
+      const srcDur = await new Promise((resolve) => { a.onloadedmetadata = () => resolve(a.duration || 0); a.onerror = () => resolve(0); });
+      if (!srcDur || !Number.isFinite(srcDur)) { window.alert(`Não foi possível ler o áudio "${file.name}".`); continue; }
+      let start = Math.max(0, timeRef.current);
+      if (start > totalRef.current - 0.5) start = 0;
+      const dur = Math.max(0.5, Math.min(srcDur, totalRef.current - start));
+      const item = { id: newId(), name: file.name, url, file, srcDur, start, in: 0, dur, volume: 1 };
+      pushHistory();
+      audiosRef.current = [...audiosRef.current, item];
+      setAudios(audiosRef.current);
+      setSelected(null); setSelectedText(null); setSelectedAudio(item.id);
+    }
+  };
+  const removeAudio = (id) => {
+    pushHistory();
+    setAudios(audiosRef.current.filter((a) => a.id !== id));
+    setSelectedAudio(null);
+  };
+  const pickAudio = (item) => {
+    setSelected(null); setSelectedText(null); setSelectedAudio(item.id); setTool('audio');
+  };
+  // Mover / esticar a barra do áudio na linha do tempo (esticar nunca passa do tamanho do arquivo)
+  const audioBarDrag = (e, item, mode) => {
+    e.stopPropagation();
+    e.preventDefault();
+    pickAudio(item);
+    const sx = e.clientX;
+    const o = { start: item.start, in: item.in, dur: item.dur };
+    const maxEnd = Math.max(totalRef.current, o.start + o.dur);
+    let moved = false;
+    const move = (ev) => {
+      if (!moved) { pushHistory(); moved = true; }
+      const dt = (ev.clientX - sx) / pps;
+      let patch;
+      if (mode === 'move') patch = { start: Math.min(Math.max(0, o.start + dt), Math.max(0, maxEnd - o.dur)) };
+      else if (mode === 'right') patch = { dur: Math.min(Math.max(0.3, o.dur + dt), item.srcDur - o.in, maxEnd - o.start) };
+      else {
+        const ns = Math.min(Math.max(0, o.start - o.in, o.start + dt), o.start + o.dur - 0.3);
+        patch = { start: ns, in: o.in + (ns - o.start), dur: o.dur - (ns - o.start) };
+      }
+      setAudios(audiosRef.current.map((a) => (a.id === item.id ? { ...a, ...patch } : a)));
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const audioLanes = useMemo(() => {
+    const ends = [];
+    const out = {};
+    [...audios].sort((a, b) => a.start - b.start).forEach((a) => {
+      let l = ends.findIndex((x) => x <= a.start + 0.001);
+      if (l === -1) { l = ends.length; ends.push(0); }
+      ends[l] = a.start + a.dur;
+      out[a.id] = l;
+    });
+    return { map: out, count: ends.length };
+  }, [audios]);
+
+  // Prévia: cada áudio toca junto com o vídeo, na posição certa
+  const audioElsRef = useRef({});
+  const musicElRef = useRef(null);
+  useEffect(() => {
+    const els = audioElsRef.current;
+    const ids = new Set(audios.map((a) => String(a.id)));
+    Object.keys(els).forEach((k) => { if (!ids.has(k)) { els[k].pause(); delete els[k]; } });
+    audios.forEach((a) => {
+      let el = els[a.id];
+      if (!el) { el = new Audio(); el.preload = 'auto'; el.src = a.url || a.remoteUrl; els[a.id] = el; }
+      el.volume = Math.min(1, Math.max(0, a.volume ?? 1));
+      const inRange = time >= a.start && time < a.start + a.dur;
+      const target = a.in + (time - a.start);
+      if (playing && inRange) {
+        if (el.paused || Math.abs(el.currentTime - target) > 0.35) el.currentTime = target;
+        if (el.paused) el.play().catch(() => {});
+      } else if (!el.paused) el.pause();
+    });
+  }, [time, playing, audios]);
+  // Música do iTunes: prévia de 30 s em loop enquanto o vídeo toca
+  useEffect(() => {
+    let el = musicElRef.current;
+    if (!music?.previewUrl) { if (el) el.pause(); return; }
+    if (!el) { el = new Audio(); el.loop = true; musicElRef.current = el; }
+    if (el.dataset.url !== music.previewUrl) { el.dataset.url = music.previewUrl; el.src = music.previewUrl; }
+    el.volume = 0.8;
+    if (playing) {
+      if (el.paused) { el.currentTime = (timeRef.current % 29); el.play().catch(() => {}); }
+    } else if (!el.paused) el.pause();
+  }, [playing, music]);
+  // Volume do vídeo original
+  useEffect(() => {
+    [videoRef.current, video2Ref.current].forEach((v) => { if (v) v.volume = videoVol; });
+  }, [videoVol, clips.length, time]);
+  useEffect(() => () => {
+    Object.values(audioElsRef.current).forEach((el) => el.pause());
+    musicElRef.current?.pause();
+  }, []);
+
   // -------- edição --------
   const splitAtPlayhead = () => {
     const t = timeRef.current;
@@ -764,6 +912,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
   };
 
   const deleteSelected = () => {
+    if (selectedAudio != null) { removeAudio(selectedAudio); return; }
     if (selectedText != null) { removeText(selectedText); return; }
     if (selected == null) return;
     commit(clips.filter((c) => c.id !== selected));
@@ -787,7 +936,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
     const base = clipsRef.current;
     const original = base.find((c) => c.id === clipId);
     const src = srcOf(original.srcId);
-    const before = { clips: base, texts: textsRef.current };
+    const before = { clips: base, texts: textsRef.current, audios: audiosRef.current, music: musicRef.current };
     let latest = base;
     const move = (ev) => {
       const dt = (ev.clientX - startX) / pps;
@@ -1094,6 +1243,56 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
               )}
             </div>
           )}
+          {tool === 'audio' && (
+            <div style={s.toolInfo}>
+              <b>Áudio</b>
+              <p style={s.subLabel}>Música (como no app)</p>
+              {music ? (
+                <MusicChip music={music} onRemove={() => { pushHistory(); setMusic(null); }} />
+              ) : (
+                <button type="button" style={s.applyAll} onClick={() => setShowMusic(true)}>+ Adicionar música</button>
+              )}
+              <p style={{ ...s.hint, marginTop: 6 }}>Toca junto na prévia (30 s) e vai com o post como sticker. Não entra no arquivo do vídeo, por causa dos direitos autorais.</p>
+
+              <p style={s.subLabel}>Seu áudio</p>
+              <button type="button" style={s.applyAll} onClick={() => audioInputRef.current?.click()} disabled={!total}>+ Enviar áudio</button>
+              <input ref={audioInputRef} type="file" accept="audio/*" multiple style={{ display: 'none' }} onChange={addAudioFiles} />
+              {!total && <p style={{ ...s.hint, marginTop: 6 }}>Coloque um vídeo na linha do tempo primeiro.</p>}
+              {audios.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {audios.map((a) => (
+                    <button key={a.id} type="button" onClick={() => pickAudio(a)}
+                      style={{ ...s.chip(selectedAudio === a.id), display: 'flex', alignItems: 'center', gap: 6, textAlign: 'left', borderRadius: 8 }}>
+                      <Music2 size={13} style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedAudioItem && (
+                <>
+                  <label style={s.amountRow}>
+                    <span style={s.hint}>Volume</span>
+                    <input type="range" min="0" max="1" step="0.05" value={selectedAudioItem.volume ?? 1}
+                      style={{ flex: 1, minWidth: 0, width: '100%', accentColor: GREEN }}
+                      onPointerDown={pushHistory}
+                      onChange={(e) => patchAudio(selectedAudioItem.id, { volume: Number(e.target.value) }, false)} />
+                    <span style={s.hint}>{Math.round((selectedAudioItem.volume ?? 1) * 100)}%</span>
+                  </label>
+                  <p style={{ ...s.hint, marginTop: 6 }}>Arraste a barra na linha do tempo para posicionar e puxe as pontas para cortar. Entra no vídeo exportado.</p>
+                  <button type="button" style={{ ...s.applyAll, marginTop: 8 }} onClick={() => removeAudio(selectedAudioItem.id)}>Remover áudio</button>
+                </>
+              )}
+
+              <p style={s.subLabel}>Volume do vídeo original</p>
+              <label style={s.amountRow}>
+                <input type="range" min="0" max="1" step="0.05" value={videoVol}
+                  style={{ flex: 1, minWidth: 0, width: '100%', accentColor: GREEN }}
+                  onChange={(e) => setVideoVol(Number(e.target.value))} />
+                <span style={s.hint}>{Math.round(videoVol * 100)}%</span>
+              </label>
+            </div>
+          )}
           {tool === 'texto' && (
             <div style={s.toolInfo}>
               <b>Texto</b>
@@ -1197,14 +1396,14 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
             </div>
 
             {/* Faixa de vídeo */}
-            <div style={s.videoTrack} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); setSelectedText(null); scrubFrom(e); } }}>
+            <div style={s.videoTrack} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); setSelectedText(null); setSelectedAudio(null); scrubFrom(e); } }}>
               {layout.map((c) => {
                 const src = srcOf(c.srcId);
                 return (
                   <div
                     key={c.id}
                     style={{ ...s.clip, left: c.start * pps, width: c.len * pps, ...(selected === c.id ? s.clipSelected : {}) }}
-                    onPointerDown={(e) => { e.stopPropagation(); setSelected(c.id); setSelectedText(null); }}
+                    onPointerDown={(e) => { e.stopPropagation(); setSelected(c.id); setSelectedText(null); setSelectedAudio(null); }}
                     onDoubleClick={() => { setPlaying(false); seek(c.start); }}
                   >
                     <div style={s.thumbsLayer}>
@@ -1240,7 +1439,7 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
             {/* Faixa de textos */}
             <div
               style={{ position: 'relative', height: textLanes.count * 28, margin: '8px 0 0 0' }}
-              onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelectedText(null); scrubFrom(e); } }}
+              onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelectedText(null); setSelectedAudio(null); scrubFrom(e); } }}
             >
               {texts.map((item) => (
                 <div
@@ -1263,6 +1462,49 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
               ))}
             </div>
 
+            {/* Faixa de áudio: música do iTunes (sticker) e áudios enviados */}
+            {(audios.length > 0 || music) && (
+              <div
+                style={{ position: 'relative', height: ((music ? 1 : 0) + audioLanes.count) * 28, margin: '8px 0 0 0' }}
+                onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelectedAudio(null); scrubFrom(e); } }}
+              >
+                {music && (
+                  <div
+                    title="Música do post (sticker). Clique para trocar ou remover."
+                    onPointerDown={(e) => { e.stopPropagation(); setTool('audio'); }}
+                    style={{
+                      position: 'absolute', top: 0, height: 24, left: 0, width: Math.max(total * pps, 14), boxSizing: 'border-box',
+                      borderRadius: 4, cursor: 'pointer', overflow: 'hidden', display: 'flex', alignItems: 'center', padding: '0 10px',
+                      fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', background: 'rgba(255,255,255,0.05)',
+                      border: '1px dashed rgba(255,255,255,0.35)', color: '#b5b5bd',
+                    }}
+                  >
+                    <Music2 size={11} style={{ marginRight: 5, flexShrink: 0 }} />
+                    {music.trackName}{music.artistName ? ` · ${music.artistName}` : ''} (sticker do post)
+                  </div>
+                )}
+                {audios.map((item) => (
+                  <div
+                    key={item.id}
+                    title="Arraste para mover. Puxe as pontas para cortar."
+                    onPointerDown={(e) => audioBarDrag(e, item, 'move')}
+                    style={{
+                      position: 'absolute', top: ((music ? 1 : 0) + audioLanes.map[item.id]) * 28, height: 24, left: item.start * pps,
+                      width: Math.max(item.dur * pps, 14), boxSizing: 'border-box', borderRadius: 4, cursor: 'grab', overflow: 'hidden',
+                      display: 'flex', alignItems: 'center', padding: '0 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                      background: selectedAudio === item.id ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)',
+                      border: `1px solid ${selectedAudio === item.id ? '#fff' : 'rgba(255,255,255,0.4)'}`, color: '#fff',
+                    }}
+                  >
+                    <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} onPointerDown={(e) => audioBarDrag(e, item, 'left')} />
+                    <Music2 size={11} style={{ marginRight: 5, flexShrink: 0 }} />
+                    {item.name}
+                    <span style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} onPointerDown={(e) => audioBarDrag(e, item, 'right')} />
+                  </div>
+                ))}
+              </div>
+            )}
+
             {dropAt !== null && <div style={{ ...s.dropLine, left: dropAt * pps }} />}
 
             {/* Agulha */}
@@ -1272,6 +1514,8 @@ export default function VideoEditor({ initialClips = [], project = null, onClose
           </div>
         </div>
       </div>
+
+      {showMusic && <MusicPicker zIndex={4000} onClose={() => setShowMusic(false)} onSelect={(m) => { pushHistory(); setMusic(m); }} />}
 
       {closing && (
         <div style={s.overlay}>

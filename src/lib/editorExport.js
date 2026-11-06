@@ -33,11 +33,12 @@ function sliceBuffer(buffer, from, to) {
 
 /**
  * @param {Array<{ file?: File, url?: string, in: number, out: number, filter?: string, transition?: { type: string, duration: number } }>} clips  clipes na ordem final
- * @param {{ ratio?: string, onProgress?: (p:number)=>void, signal?: { cancelled: boolean } }} opts
+ * @param {{ ratio?: string, onProgress?: (p:number)=>void, signal?: { cancelled: boolean }, texts?: any[],
+ *   audios?: Array<{ file?: File, url?: string, start: number, in: number, dur: number, volume?: number }>, videoVolume?: number }} opts
  * @returns {Promise<Blob>} MP4
  */
 export async function exportTimeline(clips, opts = {}) {
-  const { ratio = '9:16', onProgress = () => {}, signal = { cancelled: false }, texts = [] } = opts;
+  const { ratio = '9:16', onProgress = () => {}, signal = { cancelled: false }, texts = [], audios = [], videoVolume = 1 } = opts;
   if (!clips.length) throw new Error('Nenhum clipe para exportar.');
   const { width, height } = OUTPUT_SIZES[ratio] || OUTPUT_SIZES['9:16'];
   const total = clips.reduce((acc, c) => acc + (c.out - c.in), 0);
@@ -86,6 +87,26 @@ export async function exportTimeline(clips, opts = {}) {
     offset += clip.out - clip.in;
   }
 
+  // Áudios enviados pelo criador (narração, trilha própria): entram no vídeo, com volume e posição
+  const extraParts = []; // { buffer, at, volume }
+  for (const a of audios) {
+    const source = a.file ? new BlobSource(a.file) : new UrlSource(a.url);
+    const input = new Input({ source, formats: ALL_FORMATS });
+    const track = await input.getPrimaryAudioTrack();
+    if (track && (await track.canDecode())) {
+      const from = a.in;
+      const to = a.in + a.dur;
+      const sink = new AudioBufferSink(track);
+      for await (const { buffer, timestamp } of sink.buffers(from, to)) {
+        if (signal.cancelled) throw new Error('cancelado');
+        const piece = sliceBuffer(buffer, from - timestamp, to - timestamp);
+        if (piece) extraParts.push({ buffer: piece, at: a.start + Math.max(0, timestamp - from), volume: a.volume ?? 1 });
+      }
+      anyAudio = true;
+    }
+    input.dispose?.();
+  }
+
   let audioSource = null;
   let mixed = null;
   if (anyAudio) {
@@ -94,12 +115,20 @@ export async function exportTimeline(clips, opts = {}) {
     });
     if (audioCodec) {
       const offline = new OfflineAudioContext(2, Math.max(1, Math.ceil(total * SAMPLE_RATE)), SAMPLE_RATE);
-      audioParts.forEach(({ buffer, at }) => {
+      const addPart = ({ buffer, at, volume = 1 }) => {
         const node = offline.createBufferSource();
         node.buffer = buffer;
-        node.connect(offline.destination);
+        if (volume === 1) node.connect(offline.destination);
+        else {
+          const gain = offline.createGain();
+          gain.gain.value = volume;
+          node.connect(gain);
+          gain.connect(offline.destination);
+        }
         node.start(at);
-      });
+      };
+      audioParts.forEach((p) => addPart({ ...p, volume: videoVolume }));
+      extraParts.forEach(addPart);
       mixed = await offline.startRendering();
       audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 128000 });
       output.addAudioTrack(audioSource);

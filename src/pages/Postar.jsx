@@ -87,6 +87,7 @@ function PostarVideoPronto({ video, onDone, company = null }) {
         ...author,
         likes: 0,
         commentsCount: 0,
+        ...(video.music ? { music: video.music } : {}),
         createdAt: new Date().toISOString(),
       });
       if (company) {

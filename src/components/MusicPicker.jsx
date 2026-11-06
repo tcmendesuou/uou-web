@@ -5,7 +5,7 @@ import { searchMusic } from '../lib/music';
 const MIN = 2;
 
 // Modal "Adicionar música": busca na iTunes e devolve a faixa escolhida (igual ao app).
-export default function MusicPicker({ onClose, onSelect }) {
+export default function MusicPicker({ onClose, onSelect, zIndex = 1000 }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -41,7 +41,7 @@ export default function MusicPicker({ onClose, onSelect }) {
 
   const term = q.trim();
   return (
-    <div style={s.overlay} onClick={onClose}>
+    <div style={{ ...s.overlay, zIndex }} onClick={onClose}>
       <div style={s.box} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Adicionar música">
         <div style={s.header}>
           <span style={s.title}>Adicionar música</span>
