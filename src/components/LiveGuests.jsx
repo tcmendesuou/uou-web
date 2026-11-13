@@ -69,6 +69,18 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
     });
   }, [invites, call]);
 
+  // Garante que todo convidado no palco possa compartilhar a tela (inclusive quem foi convidado antes)
+  const grantedRef = useRef(new Set());
+  useEffect(() => {
+    if (!call) return;
+    guestUids.forEach((uid) => {
+      if (grantedRef.current.has(uid)) return;
+      grantedRef.current.add(uid);
+      call.updateUserPermissions({ user_id: uid, grant_permissions: [OwnCapability.SCREENSHARE] })
+        .catch((err) => { grantedRef.current.delete(uid); console.warn('[LiveGuests] liberar tela:', err?.message); });
+    });
+  }, [guestUids.join(','), call]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const inviteOf = (uid) => invites.find((i) => i.userId === uid);
   const onlineIds = participants.map((p) => p.userId);
   const pendingCount = invites.filter((i) => i.status === 'invited').length;
@@ -224,6 +236,7 @@ export function GuestViewerBar({ liveId }) {
     setErr('');
     try {
       if (sharingOn) { await call.screenShare.disable(); return; }
+      if (!canShare) { setErr('O criador ainda não liberou a tela. Tente de novo em instantes.'); return; }
       call.screenShare.setDefaultConstraints({ video: { displaySurface: 'monitor', frameRate: { ideal: 30 } } });
       call.screenShare.setSettings({ contentHint: 'motion' });
       call.screenShare.enableScreenShareAudio();
@@ -279,7 +292,7 @@ export function GuestViewerBar({ liveId }) {
         {err && <span style={{ color: '#ff6b6b', fontSize: 11 }}>{err}</span>}
         <button type="button" style={g.round(!micOn)} onClick={() => call.microphone.toggle().catch(() => {})} title="Microfone">{micOn ? <Mic size={18} /> : <MicOff size={18} />}</button>
         <button type="button" style={g.round(!camOn)} onClick={() => call.camera.toggle().catch(() => {})} title="Câmera">{camOn ? <Video size={18} /> : <VideoOff size={18} />}</button>
-        {canShare && (
+        {(
           <button type="button" style={g.share(sharingOn)} onClick={toggleShare} title={sharingOn ? 'Parar de compartilhar a tela' : 'Compartilhar a tela'}>
             {sharingOn ? <ScreenShareOff size={16} /> : <ScreenShare size={16} />} {sharingOn ? 'Parar tela' : 'Compartilhar tela'}
           </button>
