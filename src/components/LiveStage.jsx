@@ -109,7 +109,11 @@ export function HostControls({ isBackstage, busy, onGoLive, onEnd, onCancel }) {
       if (sharingOn) {
         await call.screenShare.disable();
       } else {
-        call.screenShare.enableScreenShareAudio(); // inclui o áudio da aba, se o navegador oferecer
+        // Jogos: sugere "Tela inteira" já selecionada no seletor do navegador (janela de jogo costuma sair preta)
+        // e prioriza fluidez de movimento sobre nitidez.
+        call.screenShare.setDefaultConstraints({ video: { displaySurface: 'monitor', frameRate: { ideal: 30 } } });
+        call.screenShare.setSettings({ contentHint: 'motion' });
+        call.screenShare.enableScreenShareAudio(); // inclui o áudio da aba/sistema, se o navegador oferecer
         await call.screenShare.enable();
       }
     } catch (err) {
@@ -124,6 +128,9 @@ export function HostControls({ isBackstage, busy, onGoLive, onEnd, onCancel }) {
   return (
     <div style={styles.controlsWrap}>
       {shareError && <p style={styles.shareError}>{shareError}</p>}
+      {!sharingOn && !shareError && (
+        <p style={styles.shareTip}>Para jogos, escolha “Tela inteira” e deixe o jogo em modo janela sem bordas.</p>
+      )}
       <div style={styles.controls}>
         <button
           type="button"
@@ -213,6 +220,7 @@ const styles = {
   },
   controlsWrap: { marginTop: 14 },
   shareError: { color: '#ff4444', fontSize: 12, margin: '0 0 8px 0' },
+  shareTip: { color: '#8a8a95', fontSize: 12, margin: '0 0 8px 0' },
   controls: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   round: (off) => ({
     width: 46,
