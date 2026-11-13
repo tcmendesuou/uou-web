@@ -36,44 +36,66 @@ export function LiveStage({ hostId, isHost = false, waitingText = 'Aguardando tr
   const host = participants.find((p) => p.userId === hostId);
   const guests = guestIds.map((id) => participants.find((p) => p.userId === id)).filter(Boolean);
 
-  const sharing = !!host && hasScreenShare(host);
-  const cameraOn = !!host && hasVideo(host);
+  // Telas compartilhadas (do criador e dos convidados) ficam grandes; câmeras ficam numa faixa menor.
+  const screens = [host, ...guests].filter((p) => p && hasScreenShare(p));
+  const hostCamOn = !!host && hasVideo(host);
 
-  let body;
-  if (!host || (!sharing && !cameraOn)) {
-    body = (
-      <div style={styles.placeholder}>
-        <NoVideo size={56} color="rgba(255,255,255,0.3)" />
-        <p style={styles.placeholderText}>
-          {!host ? waitingText : isHost ? 'Sua câmera está desligada' : 'O criador está com a câmera desligada'}
-        </p>
+  const cams = [];
+  if (host && (hostCamOn || screens.length === 0)) cams.push({ key: `${host.userId}-cam`, p: host, isHostTile: true });
+  else if (!host && screens.length === 0) cams.push({ key: 'host-wait', p: null, isHostTile: true });
+  guests.forEach((g) => cams.push({ key: `${g.userId}-cam`, p: g }));
+
+  const camTile = (c, cover) => {
+    const off = !c.p || (c.isHostTile && !hasVideo(c.p));
+    return (
+      <div key={c.key} className={cover ? 'uou-split' : undefined} style={styles.tile}>
+        {off && c.isHostTile ? (
+          <div style={styles.placeholder}>
+            <NoVideo size={cover ? 40 : 56} color="rgba(255,255,255,0.3)" />
+            <p style={styles.placeholderText}>
+              {!c.p ? waitingText : isHost ? 'Sua câmera está desligada' : 'O criador está com a câmera desligada'}
+            </p>
+          </div>
+        ) : (
+          <ParticipantView participant={c.p} trackType="videoTrack" />
+        )}
+        {!c.isHostTile && (
+          <span style={styles.guestName}>{!hasAudio(c.p) && <MicOff size={11} />} {c.p.name}</span>
+        )}
       </div>
     );
-  } else if (sharing) {
-    body = (
-      <>
-        <ParticipantView participant={host} trackType="screenShareTrack" />
-        {cameraOn && (
-          <div className="uou-pip" style={styles.pip}>
-            <ParticipantView participant={host} trackType="videoTrack" />
-          </div>
-        )}
-      </>
+  };
+
+  // Sem tela compartilhada: câmeras divididas em partes iguais (como antes)
+  if (screens.length === 0) {
+    return (
+      <div className="uou-stage" style={{ ...styles.stage, ...gridFor(cams.length) }}>
+        <style>{STAGE_CSS}</style>
+        {cams.map((c) => camTile(c, cams.length > 1))}
+      </div>
     );
-  } else {
-    body = <ParticipantView participant={host} trackType="videoTrack" />;
   }
 
+  // Com tela(s): 1 tela = tela grande à esquerda + câmeras empilhadas à direita;
+  // 2+ telas = telas lado a lado em cima + câmeras numa faixa embaixo.
+  const oneScreen = screens.length === 1;
+  const screenCols = oneScreen ? 1 : 2;
   return (
-    <div className="uou-stage" style={{ ...styles.stage, ...gridFor(guests.length + 1) }}>
+    <div className="uou-stage" style={{ ...styles.stage, ...styles.layout(oneScreen ? 'row' : 'column') }}>
       <style>{STAGE_CSS}</style>
-      <div className={guests.length && !sharing ? 'uou-split' : undefined} style={styles.tile}>{body}</div>
-      {guests.map((p) => (
-        <div key={p.userId} className="uou-split" style={styles.tile}>
-          <ParticipantView participant={p} trackType="videoTrack" />
-          <span style={styles.guestName}>{!hasAudio(p) && <MicOff size={11} />} {p.name}</span>
+      <div style={{ ...styles.screensArea, gridTemplateColumns: `repeat(${screenCols}, minmax(0, 1fr))`, gridAutoRows: 'minmax(0, 1fr)' }}>
+        {screens.map((p) => (
+          <div key={`${p.userId}-screen`} style={styles.tile}>
+            <ParticipantView participant={p} trackType="screenShareTrack" />
+            {p.userId !== hostId && <span style={styles.guestName}>Tela de {p.name}</span>}
+          </div>
+        ))}
+      </div>
+      {cams.length > 0 && (
+        <div style={oneScreen ? styles.camsCol : styles.camsRow}>
+          {cams.map((c) => camTile(c, true))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -206,20 +228,12 @@ const styles = {
     position: 'absolute', left: 6, bottom: 6, right: 6, zIndex: 3, display: 'flex', alignItems: 'center', gap: 4, color: '#fff', fontSize: 11, fontWeight: 700,
     textShadow: '0 1px 3px #000', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
   },
-  pip: {
-    position: 'absolute',
-    right: 14,
-    bottom: 14,
-    width: 200,
-    height: 120,
-    borderRadius: 10,
-    overflow: 'hidden',
-    border: '2px solid rgba(255,255,255,0.25)',
-    backgroundColor: '#000',
-    zIndex: 3,
-  },
   controlsWrap: { marginTop: 14 },
   shareError: { color: '#ff4444', fontSize: 12, margin: '0 0 8px 0' },
+  layout: (dir) => ({ display: 'flex', flexDirection: dir, gap: 4 }),
+  screensArea: { flex: 1, minWidth: 0, minHeight: 0, display: 'grid', gap: 4 },
+  camsCol: { width: '24%', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 4 },
+  camsRow: { height: '28%', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'row', gap: 4 },
   shareTip: { color: '#8a8a95', fontSize: 12, margin: '0 0 8px 0' },
   controls: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   round: (off) => ({

@@ -9,7 +9,7 @@ import {
   collection, query, where, onSnapshot, doc, setDoc, updateDoc, arrayUnion, arrayRemove,
 } from 'firebase/firestore';
 import { OwnCapability, hasAudio, useCall, useCallStateHooks } from '@stream-io/video-react-sdk';
-import { Search, UserPlus, Mic, MicOff, Video, VideoOff, X, LogOut } from 'lucide-react';
+import { Search, UserPlus, Mic, MicOff, Video, VideoOff, X, LogOut, Check, ScreenShare, ScreenShareOff } from 'lucide-react';
 import { db, auth } from '../firebase';
 
 export const MAX_GUESTS = 3;
@@ -24,6 +24,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
   const [invites, setInvites] = useState([]);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [sending, setSending] = useState({}); // uid -> 'sending' | 'sent' (feedback imediato do botão)
   const busyRef = useRef(new Set());
 
   const guestUids = live?.guestUids || [];
@@ -41,7 +42,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
     try {
       await call.updateUserPermissions({
         user_id: uid,
-        revoke_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
+        revoke_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO, OwnCapability.SCREENSHARE],
       });
     } catch (err) {
       console.warn('[LiveGuests] revogar permissão:', err?.message);
@@ -62,7 +63,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
         doneRef.current.add(key);
         call.updateUserPermissions({
           user_id: inv.userId,
-          revoke_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
+          revoke_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO, OwnCapability.SCREENSHARE],
         }).catch((err) => console.warn('[LiveGuests] revogar permissão:', err?.message));
       }
     });
@@ -76,11 +77,12 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
   const invite = async (p) => {
     setError('');
     if (full) { setError(`O palco aceita até ${MAX_GUESTS} convidados.`); return; }
+    setSending((m) => ({ ...m, [p.userId]: 'sending' }));
     try {
       // A permissão sai junto com o convite: quando a pessoa aceitar, entra direto no palco
       await call.updateUserPermissions({
         user_id: p.userId,
-        grant_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
+        grant_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO, OwnCapability.SCREENSHARE],
       });
       await setDoc(doc(db, 'live_guests', guestDocId(liveId, p.userId)), {
         liveId,
@@ -92,12 +94,17 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
         status: 'invited',
         createdAt: new Date().toISOString(),
       });
+      setSending((m) => ({ ...m, [p.userId]: 'sent' }));
     } catch (err) {
       console.error('[LiveGuests] convidar:', err);
       setError('Não foi possível enviar o convite.');
+      setSending((m) => { const n = { ...m }; delete n[p.userId]; return n; });
     }
   };
-  const cancelInvite = (uid) => updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status: 'canceled' }).catch(() => {});
+  const cancelInvite = (uid) => {
+    setSending((m) => { const n = { ...m }; delete n[uid]; return n; });
+    return updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { status: 'canceled' }).catch(() => {});
+  };
   const askUnmute = (uid) => updateDoc(doc(db, 'live_guests', guestDocId(liveId, uid)), { unmuteRequestAt: Date.now() }).catch((e) => console.error(e));
   const mute = async (uid) => {
     try { await call.muteUser(uid, 'audio'); } catch (err) { setError('Não foi possível silenciar agora.'); console.warn(err); }
@@ -143,16 +150,19 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
       {watchers.length === 0 && <p style={s.hint}>{search ? 'Ninguém encontrado com esse nome.' : 'Ninguém assistindo no momento.'}</p>}
       {watchers.map((p) => {
         const inv = inviteOf(p.userId);
-        const pending = inv && inv.status === 'invited';
+        const pending = (inv && inv.status === 'invited') || sending[p.userId] === 'sent';
+        const isSending = sending[p.userId] === 'sending';
         return (
           <div key={p.userId} style={s.row}>
             <span style={s.avatar}>{p.image ? <img src={p.image} alt="" style={s.avatarImg} /> : (p.name || '?')[0]}</span>
             <span style={s.name}>{p.name || 'Usuário'}</span>
             {pending ? (
-              <button type="button" style={s.btn(false)} onClick={() => cancelInvite(p.userId)}>Convidado · cancelar</button>
+              <button type="button" style={s.btnSent} onClick={() => cancelInvite(p.userId)} title="Clique para cancelar o convite">
+                <Check size={13} /> Convite enviado · cancelar
+              </button>
             ) : (
-              <button type="button" style={s.btn(!full)} disabled={full} onClick={() => invite(p)}>
-                <UserPlus size={13} /> Convidar
+              <button type="button" style={s.btn(!full && !isSending)} disabled={full || isSending} onClick={() => invite(p)}>
+                <UserPlus size={13} /> {isSending ? 'Enviando...' : 'Convidar'}
               </button>
             )}
           </div>
@@ -173,8 +183,10 @@ function inviteRecent(invites) {
 // ----------------------------------------------------------------- convidado
 export function GuestViewerBar({ liveId }) {
   const call = useCall();
-  const { useHasPermissions, useMicrophoneState, useCameraState } = useCallStateHooks();
+  const { useHasPermissions, useMicrophoneState, useCameraState, useScreenShareState } = useCallStateHooks();
   const canVideo = useHasPermissions(OwnCapability.SEND_VIDEO);
+  const canShare = useHasPermissions(OwnCapability.SCREENSHARE);
+  const { isEnabled: sharingOn } = useScreenShareState();
   const { isEnabled: micOn } = useMicrophoneState();
   const { isEnabled: camOn } = useCameraState();
   const uid = auth.currentUser?.uid;
@@ -204,8 +216,22 @@ export function GuestViewerBar({ liveId }) {
       startedRef.current = false;
       call.camera.disable().catch(() => {});
       call.microphone.disable().catch(() => {});
+      call.screenShare.disable().catch(() => {});
     }
   }, [onStage, canVideo, call]);
+
+  const toggleShare = async () => {
+    setErr('');
+    try {
+      if (sharingOn) { await call.screenShare.disable(); return; }
+      call.screenShare.setDefaultConstraints({ video: { displaySurface: 'monitor', frameRate: { ideal: 30 } } });
+      call.screenShare.setSettings({ contentHint: 'motion' });
+      call.screenShare.enableScreenShareAudio();
+      await call.screenShare.enable();
+    } catch (e) {
+      if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError') setErr('Não foi possível compartilhar a tela.');
+    }
+  };
 
   const answer = async (next) => {
     setErr('');
@@ -253,6 +279,11 @@ export function GuestViewerBar({ liveId }) {
         {err && <span style={{ color: '#ff6b6b', fontSize: 11 }}>{err}</span>}
         <button type="button" style={g.round(!micOn)} onClick={() => call.microphone.toggle().catch(() => {})} title="Microfone">{micOn ? <Mic size={18} /> : <MicOff size={18} />}</button>
         <button type="button" style={g.round(!camOn)} onClick={() => call.camera.toggle().catch(() => {})} title="Câmera">{camOn ? <Video size={18} /> : <VideoOff size={18} />}</button>
+        {canShare && (
+          <button type="button" style={g.share(sharingOn)} onClick={toggleShare} title={sharingOn ? 'Parar de compartilhar a tela' : 'Compartilhar a tela'}>
+            {sharingOn ? <ScreenShareOff size={16} /> : <ScreenShare size={16} />} {sharingOn ? 'Parar tela' : 'Compartilhar tela'}
+          </button>
+        )}
         <button type="button" style={g.leave} onClick={() => answer('left')}><LogOut size={15} /> Sair do palco</button>
       </div>
       </>
@@ -273,6 +304,7 @@ const s = {
   search: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, border: '1px solid #1a1a1a', backgroundColor: '#0d0d0d', marginBottom: 6 },
   input: { flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#fff', fontSize: 13, fontFamily: 'inherit' },
   iconBtn: { width: 30, height: 30, borderRadius: 8, border: '1px solid #2a2a2a', backgroundColor: '#13141a', color: '#ddd', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+  btnSent: { display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', border: '1px solid #3a3a3a', backgroundColor: '#1d1e24', color: '#cfcfd6' },
   btn: (on) => ({
     display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: on ? 'pointer' : 'default',
     fontFamily: 'inherit', whiteSpace: 'nowrap',
@@ -293,5 +325,6 @@ const g = {
   },
   badge: { flex: 1, color: GREEN, fontSize: 12, fontWeight: 700 },
   round: (off) => ({ width: 36, height: 36, borderRadius: '50%', border: '1px solid #2a2a2a', backgroundColor: off ? '#3a1111' : '#1a1a1a', color: off ? '#ff6b6b' : '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }),
+  share: (on) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, border: `1px solid ${GREEN}`, backgroundColor: on ? 'rgba(82,250,53,0.15)' : 'rgba(82,250,53,0.05)', color: GREEN, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }),
   leave: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, border: '1px solid #3a1111', backgroundColor: 'transparent', color: '#ff6b6b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' },
 };
