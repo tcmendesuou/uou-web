@@ -94,7 +94,7 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
       // A permissão sai junto com o convite: quando a pessoa aceitar, entra direto no palco
       await call.updateUserPermissions({
         user_id: p.userId,
-        grant_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO, OwnCapability.SCREENSHARE],
+        grant_permissions: [OwnCapability.SEND_AUDIO, OwnCapability.SEND_VIDEO],
       });
       await setDoc(doc(db, 'live_guests', guestDocId(liveId, p.userId)), {
         liveId,
@@ -107,6 +107,9 @@ export function LiveGuestsPanel({ liveId, live, hostId }) {
         createdAt: new Date().toISOString(),
       });
       setSending((m) => ({ ...m, [p.userId]: 'sent' }));
+      // Tela compartilhada: liberada à parte — se falhar, o convite já foi e não é afetado
+      call.updateUserPermissions({ user_id: p.userId, grant_permissions: [OwnCapability.SCREENSHARE] })
+        .catch((e) => console.warn('[LiveGuests] liberar tela:', e?.message));
     } catch (err) {
       console.error('[LiveGuests] convidar:', err);
       setError('Não foi possível enviar o convite.');

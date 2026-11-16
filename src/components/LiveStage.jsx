@@ -142,7 +142,7 @@ export function HostControls({ isBackstage, busy, onGoLive, onEnd, onCancel }) {
       // fechar a janelinha de escolha do navegador não é erro de verdade
       if (err?.name !== 'NotAllowedError' && err?.name !== 'AbortError') {
         console.error('[live] compartilhar tela:', err);
-        setShareError('Não foi possível compartilhar a tela. Verifique a permissão do navegador.');
+        setShareError(`Não foi possível compartilhar a tela (${err?.name || 'erro'}${err?.message ? ': ' + err.message : ''}). Verifique a permissão do navegador.`);
       }
     }
   };
