@@ -47,6 +47,7 @@ const SIDEBAR_EXPANDED = 260;
 export default function Layout() {
   const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
+  const [toggleInFeed, setToggleInFeed] = useState(false); // Home pode hospedar o seletor Usuário/Criador na barra do feed
 
   // ✅ Por enquanto o modo fica salvo no navegador (localStorage).
   // Quando quiser, integramos com um campo no Firestore (ex: users/{uid}.isCreator).
@@ -103,6 +104,21 @@ export default function Layout() {
       return next;
     });
   };
+
+  const roleToggle = (
+    <>
+      <span style={{ ...styles.toggleLabel, ...(!isCreator ? styles.toggleLabelActive : {}) }}>Usuário</span>
+      <button
+        type="button"
+        onClick={toggleRole}
+        style={{ ...styles.toggleTrack, ...(isCreator ? styles.toggleTrackOn : {}) }}
+        aria-label="Alternar entre modo usuário e criador"
+      >
+        <span style={{ ...styles.toggleThumb, ...(isCreator ? styles.toggleThumbOn : {}) }} />
+      </button>
+      <span style={{ ...styles.toggleLabel, ...(isCreator ? styles.toggleLabelActive : {}) }}>Criador</span>
+    </>
+  );
 
   const handleLogout = async () => {
     if (window.confirm('Deseja sair?')) {
@@ -181,6 +197,9 @@ export default function Layout() {
       {/* Coluna principal: header + conteúdo */}
       <div style={styles.mainWrapper}>
         <header style={styles.header}>
+          {/* Espaço onde a Home pode encaixar as abas (Pra Você / Seguindo / Viral / Descobrir) */}
+          <div id="uou-header-slot" style={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0 }} />
+
           {/* ✅ Toggle Usuário / Criador de Conteúdo */}
           <div style={{ ...styles.headerSide, ...styles.toggleWrap }}>
             <CompanySwitcher
@@ -190,22 +209,7 @@ export default function Layout() {
               onEnter={enterCompany}
               onLeave={leaveCompany}
             />
-            {!activeCompany && (<>
-            <span style={{ ...styles.toggleLabel, ...(!isCreator ? styles.toggleLabelActive : {}) }}>
-              Usuário
-            </span>
-            <button
-              type="button"
-              onClick={toggleRole}
-              style={{ ...styles.toggleTrack, ...(isCreator ? styles.toggleTrackOn : {}) }}
-              aria-label="Alternar entre modo usuário e criador"
-            >
-              <span style={{ ...styles.toggleThumb, ...(isCreator ? styles.toggleThumbOn : {}) }} />
-            </button>
-            <span style={{ ...styles.toggleLabel, ...(isCreator ? styles.toggleLabelActive : {}) }}>
-              Criador
-            </span>
-            </>)}
+            {!activeCompany && !toggleInFeed && roleToggle}
           </div>
         </header>
 
@@ -220,7 +224,7 @@ export default function Layout() {
               <p style={{ color: '#8a8a95', fontSize: 13 }}>Use o botão "Perfil pessoal" no topo para voltar.</p>
             </div>
           ) : (
-            <Outlet context={{ isCreator, company: activeCompany }} />
+            <Outlet context={{ isCreator, company: activeCompany, setToggleInFeed, roleToggle }} />
           )}
         </main>
       </div>
@@ -232,7 +236,7 @@ export default function Layout() {
         style={styles.chatFab}
         aria-label="Abrir chat"
       >
-        <MessageCircle size={26} color="#010208" />
+        <MessageCircle size={26} color="#52fa35" />
       </button>
     </div>
   );
@@ -393,13 +397,14 @@ const styles = {
     width: '56px',
     height: '56px',
     borderRadius: '50%',
-    backgroundColor: '#52fa35',
-    border: 'none',
+    backgroundColor: 'rgba(82,250,53,0.10)',
+    backdropFilter: 'blur(6px)',
+    WebkitBackdropFilter: 'blur(6px)',
+    border: '1px solid #52fa35',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    boxShadow: '0 4px 16px rgba(82, 250, 53, 0.35)',
     zIndex: 20,
   },
 };
