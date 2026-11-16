@@ -293,13 +293,30 @@ export default function PostFeed({ selectedTab, searchText }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, visiblePosts.length]);
 
-  const goNext = () => setCurrentIndex((i) => Math.min(i + 1, visiblePosts.length - 1));
-  const goPrev = () => setCurrentIndex((i) => Math.max(i - 1, 0));
+  // Feed contínuo (rola direto, como no Instagram). O post que cruza o centro da tela vira o "ativo":
+  // só ele toca vídeo, e só os vizinhos dele ficam montados (os demais viram um espaço do mesmo tamanho).
+  const itemRefs = useRef([]);
+  useEffect(() => {
+    const els = itemRefs.current.slice(0, visiblePosts.length).filter(Boolean);
+    if (!els.length || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((en) => {
+          if (en.isIntersecting) setCurrentIndex(Number(en.target.dataset.index));
+        });
+      },
+      { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [visiblePosts.length, loading, selectedTab]);
 
-  const handleWheel = (e) => {
-    if (e.deltaY > 20) goNext();
-    else if (e.deltaY < -20) goPrev();
+  const scrollToIndex = (i) => {
+    const el = itemRefs.current[i];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
+  const goNext = () => scrollToIndex(Math.min(currentIndex + 1, visiblePosts.length - 1));
+  const goPrev = () => scrollToIndex(Math.max(currentIndex - 1, 0));
 
   if (loading) {
     return <p style={styles.emptyText}>Carregando...</p>;
@@ -309,49 +326,59 @@ export default function PostFeed({ selectedTab, searchText }) {
     return <p style={styles.emptyText}>Nada por aqui ainda.</p>;
   }
 
-  const post = visiblePosts[currentIndex];
-
   return (
     <div style={styles.viewerWrap}>
-      {/* ✅ As setas ficam "penduradas" fora do card via position:absolute,
-          então não entram no cálculo de centralização — o card fica
-          exatamente no centro do container (mesmo eixo do logo e das abas). */}
-      <div style={styles.cardSlot}>
-        {post.type === 'live_teaser' || post.type === 'scheduled_teaser' ? (
-          <LiveTeaserCard key={post.id} item={post} onWheel={handleWheel} following={(followingIds || []).includes(post.userId)} />
-        ) : (
-          <PostCard key={post.id} post={post} onWheel={handleWheel} following={(followingIds || []).includes(post.userId)} />
-        )}
+      {visiblePosts.map((post, i) => {
+        const near = Math.abs(i - currentIndex) <= 2;
+        const isTeaser = post.type === 'live_teaser' || post.type === 'scheduled_teaser';
+        return (
+          <div
+            key={post.id}
+            ref={(el) => { itemRefs.current[i] = el; }}
+            data-index={i}
+            style={styles.cardSlot}
+          >
+            {!near ? (
+              <div style={styles.card} />
+            ) : isTeaser ? (
+              <LiveTeaserCard item={post} following={(followingIds || []).includes(post.userId)} />
+            ) : (
+              <PostCard post={post} active={i === currentIndex} following={(followingIds || []).includes(post.userId)} />
+            )}
 
-        <div style={styles.navButtons}>
-          <button
-            type="button"
-            onClick={goPrev}
-            disabled={currentIndex === 0}
-            style={{ ...styles.navButton, ...(currentIndex === 0 ? styles.navButtonDisabled : {}) }}
-            aria-label="Post anterior"
-          >
-            <ChevronUp size={22} />
-          </button>
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={currentIndex === visiblePosts.length - 1}
-            style={{
-              ...styles.navButton,
-              ...(currentIndex === visiblePosts.length - 1 ? styles.navButtonDisabled : {}),
-            }}
-            aria-label="Próximo post"
-          >
-            <ChevronDown size={22} />
-          </button>
-        </div>
-      </div>
+            {i === currentIndex && (
+              <div style={styles.navButtons}>
+                <button
+                  type="button"
+                  onClick={goPrev}
+                  disabled={currentIndex === 0}
+                  style={{ ...styles.navButton, ...(currentIndex === 0 ? styles.navButtonDisabled : {}) }}
+                  aria-label="Post anterior"
+                >
+                  <ChevronUp size={22} />
+                </button>
+                <button
+                  type="button"
+                  onClick={goNext}
+                  disabled={currentIndex === visiblePosts.length - 1}
+                  style={{
+                    ...styles.navButton,
+                    ...(currentIndex === visiblePosts.length - 1 ? styles.navButtonDisabled : {}),
+                  }}
+                  aria-label="Próximo post"
+                >
+                  <ChevronDown size={22} />
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function PostCard({ post, onWheel, following }) {
+function PostCard({ post, active = true, following }) {
   const medias = mediaListFor(post);
   const [slide, setSlide] = useState(0);
   const safeSlide = Math.min(slide, Math.max(0, medias.length - 1));
@@ -383,9 +410,9 @@ function PostCard({ post, onWheel, following }) {
 
   useEffect(() => {
     if (!videoRef.current) return;
-    if (paused) videoRef.current.pause();
+    if (paused || !active) videoRef.current.pause();
     else videoRef.current.play().catch(() => {});
-  }, [paused, safeSlide]);
+  }, [paused, safeSlide, active]);
 
   const go = (delta) => (e) => {
     e.stopPropagation();
@@ -394,7 +421,7 @@ function PostCard({ post, onWheel, following }) {
   };
 
   return (
-    <div style={styles.card} onWheel={onWheel}>
+    <div style={styles.card}>
       <div style={styles.mediaBox} onClick={togglePlay}>
         {locked ? (
           <div style={styles.lockedBox}>
@@ -403,7 +430,7 @@ function PostCard({ post, onWheel, following }) {
             <p style={styles.lockedSub}>Assine pelo app para ver este post.</p>
           </div>
         ) : isVideo ? (
-          <video key={url} ref={videoRef} src={url} poster={thumb || undefined} preload="auto" style={styles.mediaContain} autoPlay loop muted={false} playsInline />
+          <video key={url} ref={videoRef} src={url} poster={thumb || undefined} preload="auto" style={styles.mediaContain} autoPlay={active} loop muted={false} playsInline />
         ) : (
           <>
             {/* fundo desfocado preenche as sobras; a foto aparece INTEIRA por cima */}
@@ -474,7 +501,7 @@ function PostCard({ post, onWheel, following }) {
 }
 
 // ✅ Card de live no feed (ao vivo ou agendada), igual ao teaser do app
-function LiveTeaserCard({ item, onWheel, following }) {
+function LiveTeaserCard({ item, following }) {
   const navigate = useNavigate();
   const isLive = item.type === 'live_teaser';
   const mine = item.userId === auth.currentUser?.uid;
@@ -490,7 +517,7 @@ function LiveTeaserCard({ item, onWheel, following }) {
   const media = item.teaserUrl;
 
   return (
-    <div style={{ ...styles.card, cursor: isLive || mine ? 'pointer' : 'default' }} onWheel={onWheel} onClick={open}>
+    <div style={{ ...styles.card, cursor: isLive || mine ? 'pointer' : 'default' }} onClick={open}>
       <div style={styles.mediaBox}>
         {media && isVideoUrl(media) ? (
           <video src={media} style={styles.media} autoPlay loop muted playsInline />
@@ -537,8 +564,10 @@ function LiveTeaserCard({ item, onWheel, following }) {
 const styles = {
   viewerWrap: {
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: '28px',
+    paddingBottom: '40px',
   },
   cardSlot: {
     position: 'relative',

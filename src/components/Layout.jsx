@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import logoUou from '../assets/logo-uou.png';
 import CompanySwitcher from './CompanySwitcher';
 import { useMyCompanies, getActiveCompanyId, setActiveCompanyId } from '../lib/companies';
@@ -82,6 +83,13 @@ export default function Layout() {
     navigate('/perfil');
   };
 
+  // Foto do perfil para o ícone "Perfil" da sidebar (se tiver)
+  const [myPhoto, setMyPhoto] = useState(null);
+  useEffect(() => {
+    if (!uid) return undefined;
+    return onSnapshot(doc(db, 'users', uid), (snap) => setMyPhoto(snap.exists() ? snap.data().photoURL || null : null), () => {});
+  }, [uid]);
+
   const menuItems = activeCompany ? COMPANY_MENU : (isCreator ? CREATOR_MENU : USER_MENU);
 
   const toggleRole = () => {
@@ -108,14 +116,20 @@ export default function Layout() {
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
 
       {/* Sidebar — colapsada por padrão, expande no hover */}
+      {/* Reserva fixa do espaço da sidebar colapsada; ao expandir, ela passa POR CIMA do conteúdo (como no Instagram) */}
+      <div style={{ width: `${SIDEBAR_COLLAPSED}px`, flexShrink: 0, position: 'relative' }}>
       <aside
         style={{
           ...styles.sidebar,
           width: hovered ? `${SIDEBAR_EXPANDED}px` : `${SIDEBAR_COLLAPSED}px`,
+          ...(hovered ? { boxShadow: '8px 0 32px rgba(0,0,0,0.6)' } : {}),
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
+        {/* Logo do UOU: fica só aqui na sidebar (não se move quando ela expande) */}
+        <div style={styles.sideLogo}><img src={logoUou} alt="UOU" style={styles.sideLogoImg} /></div>
+
         {/* ✅ Espaçador: empurra o menu pra parte de baixo da sidebar */}
         <div style={{ flex: 1 }} />
 
@@ -132,8 +146,20 @@ export default function Layout() {
                 ...(activeCompany ? { padding: hovered ? '10px 28px' : '10px 0' } : {}),
               })}
             >
-              <item.icon size={26} style={{ flexShrink: 0 }} />
-              {hovered && <span style={styles.navLabel}>{item.label}</span>}
+              {({ isActive }) => (
+                <>
+                  {item.path === '/perfil' && myPhoto ? (
+                    <img
+                      src={myPhoto}
+                      alt=""
+                      style={{ ...styles.navAvatar, ...(isActive ? { borderColor: '#52fa35' } : {}) }}
+                    />
+                  ) : (
+                    <item.icon size={26} style={{ flexShrink: 0 }} />
+                  )}
+                  {hovered && <span style={styles.navLabel}>{item.label}</span>}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -150,14 +176,11 @@ export default function Layout() {
           {hovered && <span style={styles.navLabel}>Sair</span>}
         </button>
       </aside>
+      </div>
 
       {/* Coluna principal: header + conteúdo */}
       <div style={styles.mainWrapper}>
         <header style={styles.header}>
-          <div style={styles.headerSide} />
-
-          <h1 style={styles.headerLogo}><img src={logoUou} alt="UOU" style={styles.headerLogoImg} /></h1>
-
           {/* ✅ Toggle Usuário / Criador de Conteúdo */}
           <div style={{ ...styles.headerSide, ...styles.toggleWrap }}>
             <CompanySwitcher
@@ -232,8 +255,17 @@ const styles = {
     flexShrink: 0,
     overflow: 'hidden',
     transition: 'width 0.18s ease',
-    zIndex: 10,
+    zIndex: 30,
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    boxSizing: 'border-box',
+    transition: 'width 0.18s ease, box-shadow 0.18s ease',
   },
+  sideLogo: { width: `${SIDEBAR_COLLAPSED}px`, display: 'flex', justifyContent: 'center', flexShrink: 0, paddingTop: '4px' },
+  sideLogoImg: { height: '22px', width: 'auto', display: 'block' },
+  navAvatar: { width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid transparent', boxSizing: 'border-box' },
   nav: {
     display: 'flex',
     flexDirection: 'column',
@@ -289,10 +321,10 @@ const styles = {
     minWidth: 0,
   },
   header: {
-    height: '72px',
+    height: '56px',
     borderBottom: '1px solid #1a1a1a',
-    display: 'grid',
-    gridTemplateColumns: '1fr auto 1fr',
+    display: 'flex',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     padding: '0 32px',
     flexShrink: 0,
@@ -352,7 +384,7 @@ const styles = {
   main: {
     flex: 1,
     overflow: 'auto',
-    padding: '32px',
+    padding: '20px 32px 32px',
   },
   chatFab: {
     position: 'absolute',
