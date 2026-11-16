@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
@@ -47,6 +47,8 @@ const SIDEBAR_EXPANDED = 260;
 export default function Layout() {
   const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
+  const mainRef = useRef(null);
+  const [scrollbarW, setScrollbarW] = useState(0); // largura da barra de rolagem, para centralizar o header com o feed
   const [toggleInFeed, setToggleInFeed] = useState(false); // Home pode hospedar o seletor Usuário/Criador na barra do feed
 
   // ✅ Por enquanto o modo fica salvo no navegador (localStorage).
@@ -119,6 +121,19 @@ export default function Layout() {
       <span style={{ ...styles.toggleLabel, ...(isCreator ? styles.toggleLabelActive : {}) }}>Criador</span>
     </>
   );
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = () => setScrollbarW(el.offsetWidth - el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    const mo = new MutationObserver(() => { if (el.firstElementChild) ro.observe(el.firstElementChild); measure(); });
+    mo.observe(el, { childList: true });
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, []);
 
   const handleLogout = async () => {
     if (window.confirm('Deseja sair?')) {
@@ -196,9 +211,10 @@ export default function Layout() {
 
       {/* Coluna principal: header + conteúdo */}
       <div style={styles.mainWrapper}>
-        <header style={styles.header}>
+        <header style={{ ...styles.header, paddingRight: `${32 + scrollbarW}px` }}>
+          <div />
           {/* Espaço onde a Home pode encaixar as abas (Pra Você / Seguindo / Viral / Descobrir) */}
-          <div id="uou-header-slot" style={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0 }} />
+          <div id="uou-header-slot" style={{ display: 'flex', justifyContent: 'center', minWidth: 0 }} />
 
           {/* ✅ Toggle Usuário / Criador de Conteúdo */}
           <div style={{ ...styles.headerSide, ...styles.toggleWrap }}>
@@ -213,7 +229,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main style={styles.main}>
+        <main ref={mainRef} style={styles.main}>
           {activeCompany?.status === 'suspended' ? (
             <div style={{ maxWidth: 520, margin: '60px auto', textAlign: 'center', color: '#f0f0f0' }}>
               <h2 style={{ margin: '0 0 8px' }}>Empresa suspensa</h2>
@@ -327,8 +343,8 @@ const styles = {
   header: {
     height: '56px',
     borderBottom: '1px solid #1a1a1a',
-    display: 'flex',
-    justifyContent: 'flex-end',
+    display: 'grid',
+    gridTemplateColumns: '1fr auto 1fr',
     alignItems: 'center',
     padding: '0 32px',
     flexShrink: 0,
@@ -388,7 +404,7 @@ const styles = {
   main: {
     flex: 1,
     overflow: 'auto',
-    padding: '20px 32px 32px',
+    padding: '14px 32px 32px',
   },
   chatFab: {
     position: 'absolute',
