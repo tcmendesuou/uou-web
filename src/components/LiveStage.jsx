@@ -151,7 +151,7 @@ export function HostControls({ isBackstage, busy, onGoLive, onEnd, onCancel }) {
     <div style={styles.controlsWrap}>
       {shareError && <p style={styles.shareError}>{shareError}</p>}
       {!sharingOn && !shareError && (
-        <p style={styles.shareTip}>Para jogos, escolha “Tela inteira” e deixe o jogo em modo janela sem bordas.</p>
+        <p style={styles.shareTip}>Para jogos: escolha “Tela inteira” e selecione o monitor onde o jogo vai abrir. Dá para compartilhar antes de abrir o jogo.</p>
       )}
       <div style={styles.controls}>
         <button
