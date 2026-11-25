@@ -23,6 +23,7 @@ const EmpresaConfig = lazy(() => import('./pages/EmpresaConfig'));
 const Equipe = lazy(() => import('./pages/Equipe'));
 const EmpresaEmBreve = lazy(() => import('./pages/EmpresaEmBreve'));
 const PostPublico = lazy(() => import('./pages/PostPublico'));
+const ExcluirConta = lazy(() => import('./pages/ExcluirConta'));
 const EditorTeste = lazy(() => import('./pages/EditorTeste'));
 
 export default function App() {
@@ -88,6 +89,7 @@ export default function App() {
           <Route path="empresa/:tab" element={<EmpresaEmBreve />} />
         </Route>
         <Route path="/p/:postId" element={<PostPublico />} />
+        <Route path="/excluir-conta" element={<ExcluirConta />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
